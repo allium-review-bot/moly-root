@@ -919,14 +919,33 @@ as-is; this module does not re-implement that. **A sprite with no `Sprite` objec
 left is not cropped**, and `cropReason` says so — without the mesh there is no
 tight packing to undo, and a guessed rectangle would bake in a wrong image. Whole
 atlas textures sit in `textures/` (only the atlases the caller names are decoded:
-this snapshot inventories 51 atlases, decodes 2, writes 3 whole textures —
-CommonAtlas's two 2048×2048 ASTC 4x4 sheets and TalkBalloonAtlas's one 1024×1024);
-every other atlas still has inventory rows with dimensions, so a later one-off
-crop needs no new discovery pass. This snapshot has 30 crops, including the
-button `btn_r30_wh` (80×80, 9-slice border 38 on all four sides), the direction
-triangle `balloon_direction_triangle_wh` (40×20), the base `bg_base_r30_wh`
-(70×70, 9-slice 34), and TalkBalloonAtlas's `balloon_announce`/thinking/cry
-family.
+this snapshot inventories 51 atlases, decodes 9, writes 10 whole textures —
+CommonAtlas's two 2048×2048 ASTC 4x4 sheets, one 1024×1024 each for
+TalkBalloonAtlas, AreaAtlas and MysekaiAtlas, two for CheerfulCarnivalAtlas, one
+2048×2048 ASTC 6x6 each for ResultAtlas and VirtualLiveAtlas, and ScenarioAtlas's
+one 128×512 ASTC 6x6); every other atlas still has inventory rows with
+dimensions, so a later one-off crop needs no new discovery pass. This snapshot
+has 57 crops, including the button `btn_r30_wh` (80×80, 9-slice border 38 on all
+four sides), the direction triangle `balloon_direction_triangle_wh` (40×20), the
+base `bg_base_r30_wh` (70×70, 9-slice 34), TalkBalloonAtlas's
+`balloon_announce`/thinking/cry family, **the two sprites the dialogue window
+consumes** — the end mark `icon_pageForward_gn` (50×44; CommonAtlas carries a
+same-named twin that is cropped too, the consumer reads the ScenarioAtlas one)
+and the panel dim band `bg_story_adv` (4×399, 9-slice left 2) — and the
+balloon-prefixed remainder in five more atlases (AreaAtlas 2,
+CheerfulCarnivalAtlas 5, MysekaiAtlas 9, ResultAtlas 2, VirtualLiveAtlas 6):
+no `cropReason=undecoded` row is left.
+
+Two named facts, so the numbers are not misread. **MenuAtlas ships empty**
+(zero packed names, zero textures), yet the talk window's EndSign star node asks
+it by name for `icon_pageForward_2` — a player-data-wide sweep of every Sprite
+object in every serialized file finds no such sprite, so the star's real art is
+not in the data at all: an upstream gap, not an extractor one. And a tight-packed
+crop's size is the **mesh-true shape**, not always the authored `m_Rect`: 55 of
+the 57 crops match `m_Rect` exactly; the two exceptions are both entries named
+`balloon_busy` (MysekaiAtlas/VirtualLiveAtlas, tight bit set) — the transparent
+border was trimmed at packing time, the decoded 114×148 is the actual opaque
+shape, and the authored 116×152 stays on the record.
 
 ## Shared Action Library And Index
 

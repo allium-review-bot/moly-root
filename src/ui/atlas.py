@@ -56,11 +56,19 @@ from UnityPy.export import SpriteHelper
 from core.jsonio import write_json
 
 # The atlases whose textures are decoded to PNG, and the sprites cropped out
-# of any decoded atlas.  Defaults name this module's shipped order's targets;
-# they are caller-overridable, not secrets.
-DEFAULT_DECODE_ATLASES = ("CommonAtlas", "TalkBalloonAtlas")
+# of any decoded atlas.  Defaults name the shipped orders' targets: D51 named
+# the dialogue-face atlases, D72 named the scenario-dialogue face and the
+# atlases still holding balloon-prefixed sprites; they are caller-overridable,
+# not secrets.  MenuAtlas is decoded-on-point even though the player data
+# ships it empty (zero packed names, zero textures) -- the EndSign star node
+# requests `icon_pageForward_2` from it by name, and the emptiness is the
+# finding: that sprite exists nowhere in the player data.
+DEFAULT_DECODE_ATLASES = ("AreaAtlas", "CheerfulCarnivalAtlas", "CommonAtlas",
+                          "MenuAtlas", "MysekaiAtlas", "ResultAtlas",
+                          "ScenarioAtlas", "TalkBalloonAtlas",
+                          "VirtualLiveAtlas")
 DEFAULT_CROP_NAMES = ("btn_r30_wh", "balloon_direction_triangle_wh",
-                      "bg_base_r30_wh")
+                      "bg_base_r30_wh", "icon_pageForward_gn", "bg_story_adv")
 DEFAULT_CROP_PREFIXES = ("balloon_",)
 
 
