@@ -247,8 +247,15 @@ class PackageExtract:
                 self.unsupported.append({"node": path, "component": None,
                                          "reason": "component object not in this package"})
                 continue
-            if kind in ("Transform", "RectTransform"):
+            if kind == "Transform":
                 self._mark(record, path_id, "exported", "node tree")
+                continue
+            if kind == "RectTransform":
+                # The node tree already carries a RectTransform's local TRS, but
+                # its layout geometry -- anchors, size, pivot -- is authored data
+                # no other reader covers, so it is exported as a component like
+                # every non-walked kind rather than being marked and dropped.
+                self._other_component(record, path_id, kind, path)
                 continue
             if kind in ("MeshFilter", "MeshRenderer", "SkinnedMeshRenderer"):
                 self._mark(record, path_id, "exported", "geometry")
@@ -679,6 +686,22 @@ class PackageExtract:
                 self.roots.append(self.root(record, graph, transform, is_primary))
         if self.roots and not any(entry["primary"] for entry in self.roots):
             self.roots[0]["primary"] = True
+        if not self.hashes and any(
+                kind == "AnimationClip"
+                for record in self.package.files for kind in record.kinds.values()):
+            # An animation package ships clips and no trees at all: the paths
+            # its bindings name live under the animator, and the animator is in
+            # a package that declares this one a dependency (the sitemap
+            # animation package is declared by the sitemap prefab package).
+            # With no trees of its own there is nothing those paths could be
+            # but foreign ones, so the dependents' trees feed the same map -- a
+            # binding that matches neither stays the visible hash it was.
+            # A package with its own trees never takes this branch, so a
+            # foreign path can never stand in for an unresolved local one, and
+            # a treeless package with no clips never pays the scan.
+            for package in self.store.dependents(self.name):
+                for record in package.files:
+                    self.hashes.update(path_hashes(Graph(record)))
         for record in self.package.files:
             for path_id, kind in sorted(record.kinds.items()):
                 if self._state(record, path_id) is not None:

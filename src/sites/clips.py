@@ -10,7 +10,11 @@ What a compiled clip does *not* carry is the name of the object each curve drive
 a binding names its target by a hash of the node path.  Those hashes are CRC-32 of
 the path string, which is checked rather than assumed — the packages' own node paths
 are hashed and matched against the bindings, and a binding whose hash matches no
-node in the package keeps the hash and says so instead of being dropped.
+node in the package keeps the hash and says so instead of being dropped.  The
+same one-way rule covers the *property* name: a non-transform binding
+addresses a serialized property by a CRC-32 of its name, which is resolved
+through the table of observed property names and left as the hash when the
+table does not know it.
 
 Curve values are written exactly as the segments store them.  A streamed segment's
 keys are cubic coefficients, so they are labelled ``cubic`` and carry all four; a
@@ -30,6 +34,34 @@ from chara.mecanim.clip import curve_index_map, decode
 TRANSFORM_TYPEID = 4
 TRANSFORM_ATTRIBUTES = {1: ("translation", 3), 2: ("rotation", 4),
                         3: ("scale", 3), 4: ("eulerAngles", 3)}
+
+# The class each observed binding type id names.  Unity's native class ids are
+# fixed, and every id here is confirmed by the field its bindings address:
+# 224 bindings carry ``m_AnchoredPosition`` (RectTransform), 225 carries
+# ``m_Alpha`` (CanvasGroup), 1 carries ``m_IsActive`` (GameObject), 114 carries
+# ``m_Color`` (a UI Graphic behaviour).
+BINDING_TYPES = {1: "GameObject", 4: "Transform", 114: "MonoBehaviour",
+                 224: "RectTransform", 225: "CanvasGroup"}
+
+# Serialized property names a non-transform binding can address, keyed by the
+# CRC-32 the binding carries in place of the name.  Every name is a real
+# serialized field of the class its type id names (the RectTransform set is the
+# typetree's own key list; ``m_Color`` is Graphic's; ``m_Alpha`` is
+# CanvasGroup's; ``m_IsActive`` is GameObject's), and the eight hashes observed
+# in the shipped clips all resolve through it.  A hash the table does not know
+# stays a hash, visibly, rather than being guessed at.
+ATTRIBUTE_NAMES = {zlib.crc32(name.encode("utf-8")) & 0xFFFFFFFF: name for name in (
+    "m_AnchoredPosition.x", "m_AnchoredPosition.y", "m_AnchoredPosition.z",
+    "m_SizeDelta.x", "m_SizeDelta.y",
+    "m_AnchorMin.x", "m_AnchorMin.y", "m_AnchorMax.x", "m_AnchorMax.y",
+    "m_Pivot.x", "m_Pivot.y",
+    "m_LocalPosition.x", "m_LocalPosition.y", "m_LocalPosition.z",
+    "m_LocalScale.x", "m_LocalScale.y", "m_LocalScale.z",
+    "m_LocalRotation.x", "m_LocalRotation.y", "m_LocalRotation.z",
+    "m_LocalRotation.w",
+    "m_Color.r", "m_Color.g", "m_Color.b", "m_Color.a",
+    "m_Alpha", "m_IsActive",
+)}
 
 UNDECODABLE = "compiled animation clip could not be decoded"
 NO_CURVES = ("clip carries no curve data: its compiled segments are all empty, "
@@ -94,13 +126,31 @@ def path_hashes(graph):
     return hashes
 
 
+def _attribute_name(type_id, attribute):
+    """The property name a binding's attribute names, when it is known.
+
+    A transform binding's attribute is one of Unity's four transform
+    properties, and the table names those by number.  Every other binding
+    addresses a serialized property **by a CRC-32 of its name**, which is
+    one-way: the name is recovered by lookup, and an unknown hash is kept as
+    the hash rather than guessed at.
+    """
+    if type_id == TRANSFORM_TYPEID:
+        return TRANSFORM_ATTRIBUTES.get(attribute, (None, 1))[0]
+    return ATTRIBUTE_NAMES.get(attribute)
+
+
 def _binding(entry, hashes):
-    attribute, components = TRANSFORM_ATTRIBUTES.get(
-        entry.get("attribute"), (None, 1))
+    type_id = entry.get("typeID")
+    raw = entry.get("attribute")
+    attribute, components = TRANSFORM_ATTRIBUTES.get(raw, (None, 1))
     digest = int(entry.get("path", 0)) & 0xFFFFFFFF
-    return {"typeId": entry.get("typeID"),
-            "attribute": attribute if entry.get("typeID") == TRANSFORM_TYPEID
-            else entry.get("attribute"),
+    named = _attribute_name(type_id, raw)
+    return {"typeId": type_id,
+            "typeName": BINDING_TYPES.get(type_id),
+            "attribute": named if named is not None else raw,
+            "attributeName": named is not None,
+            "attributeHash": None if type_id == TRANSFORM_TYPEID else raw,
             "components": components,
             "pathHash": digest,
             "node": hashes.get(digest),
@@ -136,10 +186,13 @@ def clip_document(record, path_id, hashes):
         entry = {"curve": index, "kind": kind}
         if target is not None:
             type_id, attribute, digest, component = target
-            name, _ = TRANSFORM_ATTRIBUTES.get(attribute, (None, 1))
-            entry.update(typeId=type_id, node=hashes.get(digest & 0xFFFFFFFF),
+            named = _attribute_name(type_id, attribute)
+            entry.update(typeId=type_id, typeName=BINDING_TYPES.get(type_id),
+                         node=hashes.get(digest & 0xFFFFFFFF),
                          pathHash=digest & 0xFFFFFFFF,
-                         attribute=name if type_id == TRANSFORM_TYPEID else attribute,
+                         attribute=named if named is not None else attribute,
+                         attributeName=named is not None,
+                         attributeHash=None if type_id == TRANSFORM_TYPEID else attribute,
                          component=component)
         entry["keys"] = [[float(time),
                           ([float(v) for v in value]

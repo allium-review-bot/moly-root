@@ -849,7 +849,65 @@ One family deserves a note of its own: **the 23 room skins really do carry
 for **the eight scene packages** only — a door or a window is itself a fixture-class
 asset. The skins' door animations are decoded from their compiled curves (161 clips
 in all), the node path of each binding is recovered by CRC-32 lookup, and a hash that
-matches no node is kept as the hash and said to be unresolved.
+matches no node is kept as the hash and said to be unresolved. **The property
+name of a non-transform binding is CRC-32 one-way too**: the `m_AnchoredPosition.x`,
+`m_Color.a`, `m_Alpha` family is recovered by lookup, and a hash the table does not
+know stays with `attributeName: false`. **An animation package carries no node tree
+of its own**: its bindings name hierarchies in other packages (the sitemap animation
+package is declared a dependency by the sitemap prefab package), and then the
+dependents' trees feed the same hash table — a package with trees of its own never
+takes that branch, so a foreign path can never stand in for an unresolved local one.
+
+`RectTransform` and `Transform` are **disposed of separately** in `components`: a
+`Transform`'s TRS is already in the node tree and is skipped as before, while a
+`RectTransform`'s **layout geometry** (`m_AnchorMin` / `m_AnchorMax` /
+`m_AnchoredPosition` / `m_SizeDelta` / `m_Pivot`, all with the `m_` prefix) is
+authored data the node tree does not cover and is exported as a component. In the
+sitemap prefab all 92 rows carry all five fields.
+
+## `ui/`
+
+The dialogue windows and the UI sprite atlases take **no downloadable package as
+input**: both are built into the APK's player data, no bundle name can name them,
+and they are not routed — the caller passes that file's path. Without it, the
+report's `playerData` section still carries one entry each, marked `skipped` with
+the reason — an omitted entry would read as "this domain does not exist" when the
+fact is "nobody supplied its input".
+
+### `ui/atlas/`: sprite atlases and their crops
+
+A `SpriteAtlas` packs hundreds of named sprites into one `Texture2D`, and after
+packing a sprite's own texture pointer is null: its placement lives in the atlas's
+`m_RenderDataMap`, whose index is the sprite's position in
+`m_PackedSpriteNamesToIndex`. **That parallel-list join is the product's one
+structural claim**: the two lists must be the same length (`joinHolds`), and every
+sprite's `m_Rect` size is compared against its atlas entry's `textureRect` size and
+counted (this snapshot: 2223/2223 sprites have a comparable object, 1957 agree,
+the rest are rotated or tightly packed).
+
+Each sprite row carries: `textureRect` (in atlas pixels, **origin bottom-left**),
+`atlasRectOffset`, `uvTransform`, `settingsRaw` (packing flags: bit 0 packed,
+bit 1 packing mode, bits 2-5 rotation), `downscaleMultiplier`, the
+`texture`/`alphaTexture` path ids, and the joined `Sprite` object's authored
+geometry: `m_Rect`, `m_Offset`, `m_Pivot`, `m_PixelsToUnits` and the **9-slice
+`m_Border`** (x=left, y=bottom, z=right, w=top — the atlas entry does not repeat
+it, so the join by name is what makes it reachable).
+
+A crop `sprites/<atlas>/<sprite>.png` is **not a rectangle crop**: whatever the
+reader's own sprite decoder produces — resolving the atlas pointer, undoing the
+packing rotation, masking tightly packed sprites through their mesh — is saved
+as-is; this module does not re-implement that. **A sprite with no `Sprite` object
+left is not cropped**, and `cropReason` says so — without the mesh there is no
+tight packing to undo, and a guessed rectangle would bake in a wrong image. Whole
+atlas textures sit in `textures/` (only the atlases the caller names are decoded:
+this snapshot inventories 51 atlases, decodes 2, writes 3 whole textures —
+CommonAtlas's two 2048×2048 ASTC 4x4 sheets and TalkBalloonAtlas's one 1024×1024);
+every other atlas still has inventory rows with dimensions, so a later one-off
+crop needs no new discovery pass. This snapshot has 30 crops, including the
+button `btn_r30_wh` (80×80, 9-slice border 38 on all four sides), the direction
+triangle `balloon_direction_triangle_wh` (40×20), the base `bg_base_r30_wh`
+(70×70, 9-slice 34), and TalkBalloonAtlas's `balloon_announce`/thinking/cry
+family.
 
 ## Shared Action Library And Index
 

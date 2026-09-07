@@ -682,7 +682,21 @@ glb 里的 glTF 材质是**预览近似**，不是翻译，每个取值都来自
 
 `packages.json` 里每个包一条，带对象清点、类型直方图、脚本直方图与 `objects: {total, exported, skipped, unsupported, accountedFor}`。三种处置**必须加起来等于总数**（109 个包全部满足）——这就是「没有一个包留着未查」的可核形式，而不是一句声明。`skipped` 一定带理由（包自己的清单对象、脚本身份、包内 shader 变体、动画状态机）。**本提取器没有结构化读法的组件仍然导出**：它的序列化字段原样写出、指针换成它指的东西，解释与提取是两件事，不解释不构成丢数据的理由。
 
-一族值得单说：**23 套房间皮肤确实带 `FixtureView` 与 `NavMeshModifier`**。「站点场景里零家具 MonoBehaviour」这句只对**八个场景包**成立——门与窗本身就是家具类资产。皮肤里的门开合动画按编译曲线解出（161 段），绑定的节点路径由 CRC-32 反查还原，认不出的哈希原样留下并标明。
+一族值得单说：**23 套房间皮肤确实带 `FixtureView` 与 `NavMeshModifier`**。「站点场景里零家具 MonoBehaviour」这句只对**八个场景包**成立——门与窗本身就是家具类资产。皮肤里的门开合动画按编译曲线解出（161 段），绑定的节点路径由 CRC-32 反查还原，认不出的哈希原样留下并标明。**非 transform 绑定的属性名也是 CRC-32 单向的**：`m_AnchoredPosition.x`、`m_Color.a`、`m_Alpha` 一族按查表还原，表里没有的哈希连同 `attributeName: false` 原样留下。**动画包自己没有节点树**：它的绑定指向别的包里的层级（世界地图的动画包被 prefab 包声明为依赖），此时依赖方的树喂同一张哈希表——本包有树时永远只用本包的树，外部路径不会顶替未解析的本地路径。
+
+`components` 里 **`RectTransform` 与 `Transform` 分开处置**：`Transform` 的 TRS 已在节点树里，照旧跳过；`RectTransform` 的**布局几何**（`m_AnchorMin` / `m_AnchorMax` / `m_AnchoredPosition` / `m_SizeDelta` / `m_Pivot`，全部带 `m_` 前缀）是节点树不覆盖的作者数据，按组件导出。世界地图 prefab 里 92 条全部带全五字段。
+
+## `ui/`
+
+对话窗与 UI 精灵图集的输入**不是任何可下载的包**：两者都内置在 APK 的 player data 里，没有包名能指到它们，所以不由路由认领，由调用方传这个文件的路径。没传时报告的 `playerData` 一节照样各带一条，状态 `skipped` 并写明理由——条目缺席会被读成「这个域不存在」，而事实是「没人给它输入」。
+
+### `ui/atlas/`：精灵图集与裁片
+
+`SpriteAtlas` 把几百个具名 sprite 打进一张 `Texture2D`，打完包后 sprite 自己的贴图指针是空的，位置活在图集的 `m_RenderDataMap` 里，其下标就是 sprite 在 `m_PackedSpriteNamesToIndex` 里的位置。**这条平行表连接是产物唯一的结构性声明**：两表长度必须相等（`joinHolds`），每个 sprite 的 `m_Rect` 尺寸与图集条目的 `textureRect` 尺寸逐条比对并计数（本快照 2223/2223 有对象可比，1957 相合，其余是旋转或裁剪打包）。
+
+每条 sprite 行带：`textureRect`（图集像素，**原点在左下**）、`atlasRectOffset`、`uvTransform`、`settingsRaw`（打包旗标：bit0 打包、bit1 打包模式、bit2-5 旋转）、`downscaleMultiplier`、`texture`/`alphaTexture` 的 pathId，以及 join 到的 `Sprite` 对象的作者几何：`m_Rect`、`m_Offset`、`m_Pivot`、`m_PixelsToUnits` 与**九宫 `m_Border`**（x=左 y=下 z=右 w=上——图集条目不带它，名字连接才使它可达）。
+
+裁片 `sprites/<图集名>/<sprite名>.png` **不是矩形裁剪**：读器自己的 sprite 解码器（解图集指针、撤销打包旋转、对 tight 打包按 sprite 网格裁形）出什么就存什么，本模块不重做这套变换。**没有留下 `Sprite` 对象的 sprite 不裁**，`cropReason` 写明——没有网格就没有 tight 打包可解，猜一个矩形等于烤进一张错图。图集整图在 `textures/`（仅解调用方点名要的图集，本快照 51 个图集盘点、2 个解码、3 张整图：CommonAtlas 两张 2048×2048 ASTC 4x4、TalkBalloonAtlas 一张 1024×1024）；其余图集照样有盘点行（含尺寸），事后补一张裁片不需要重跑发现。本快照 30 张裁片，含按钮 `btn_r30_wh`（80×80，九宫四边 38）、方向三角 `balloon_direction_triangle_wh`（40×20）、底图 `bg_base_r30_wh`（70×70，九宫 34）与 TalkBalloonAtlas 的 `balloon_announce`/thinking/cry 一族。
 
 ## 共享动作库与索引
 

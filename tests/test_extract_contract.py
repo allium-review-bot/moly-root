@@ -452,10 +452,15 @@ def test_ui_is_skipped_with_a_reason_when_no_player_data(tmp_path):
     report = extract_manifest(None, store, out)
     ui = [entry for entry in report.get("playerData", [])
           if entry.get("domain") == "ui"]
-    assert len(ui) == 1, report.get("playerData")
-    assert ui[0]["status"] == "skipped"
-    assert ui[0]["error"].strip()
+    assert len(ui) == 2, report.get("playerData")
+    # Two player-data UI artifacts: the dialogue windows and the sprite
+    # atlases.  Both carry the same rule -- skipped with a reason when nobody
+    # supplied the player data -- so both are checked, not just the first.
+    for entry in ui:
+        assert entry["status"] == "skipped"
+        assert entry["error"].strip()
     assert not (out / "ui" / "talk.json").exists()
+    assert not (out / "ui" / "atlas" / "atlas.json").exists()
 
 
 def test_ui_runs_when_the_player_data_path_is_supplied(tmp_path):
@@ -467,9 +472,10 @@ def test_ui_runs_when_the_player_data_path_is_supplied(tmp_path):
     absent = tmp_path / "data.unity3d"
     report = extract_manifest(None, store, tmp_path / "out", player_data=absent)
     ui = [entry for entry in report["playerData"] if entry.get("domain") == "ui"]
-    assert len(ui) == 1
-    assert ui[0]["status"] == "failed"
-    assert "data.unity3d" in ui[0]["error"]
+    assert len(ui) == 2
+    for entry in ui:
+        assert entry["status"] == "failed"
+        assert "data.unity3d" in entry["error"]
 
 
 # ---------------------------------------------------------------------------

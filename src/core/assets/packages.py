@@ -271,6 +271,20 @@ class PackageStore:
             engine_archives=BUILTIN_ARCHIVES))
         return answer
 
+    def dependents(self, name):
+        """Every package loaded into the store that declares *name* a dependency.
+
+        The dependency edges point from a consumer to what it consumes, so the
+        packages that hold a thing's users are found by looking backwards along
+        them.  Only packages the store already loaded are returned: this is a
+        lookup over what is in hand, not a scan of the bundle directory.
+        """
+        logical = str(name)
+        return [package for package in self._packages.values()
+                if package is not None
+                and logical in {dependency.replace("/", "__")
+                                for dependency in package.dependencies}]
+
     def load_dependencies(self, names):
         """Load *names* and everything they declare, as far as the store reaches."""
         pending, seen = list(names), set()
