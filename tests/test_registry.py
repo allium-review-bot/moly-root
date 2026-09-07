@@ -17,12 +17,17 @@ from chara.registry import DERIVED, build_registry
 class _Master:
     """Stand-in for core.master.Master with the tables in play."""
 
-    def __init__(self, identity, locomotion, solo, client_configs=None):
+    def __init__(self, identity, locomotion, solo, client_configs=None,
+                 characters=None):
         self._identity, self._locomotion = identity, locomotion
         self._solo, self._client_configs = solo, client_configs
+        self._characters = {} if characters is None else characters
 
     def character_units(self):
         return self._identity
+
+    def game_characters(self):
+        return self._characters
 
     def locomotion(self):
         return self._locomotion
@@ -49,7 +54,8 @@ def _master(**over):
     return _Master(over.get("identity", identity),
                    over.get("locomotion", {12: dict(LOCO_ROW)}),
                    over.get("solo", {12: "character_alone_action_12"}),
-                   over.get("client_configs", {77: 2.5, 78: 2.5, 95: 1.75}))
+                   over.get("client_configs", {77: 2.5, 78: 2.5, 95: 1.75}),
+                   over.get("characters", {}))
 
 
 def test_player_exports_declared_configs_and_rows():
@@ -109,7 +115,8 @@ def test_a_missing_source_row_is_reported_not_defaulted():
 
 def test_a_character_absent_from_every_table_still_appears():
     doc = build_registry(_master(), [12, 21])
-    assert doc["characters"]["21"] == {"unitId": 21, "identity": None,
+    assert doc["characters"]["21"] == {"unitId": 21, "name": None,
+                                       "identity": None,
                                        "locomotion": None, "soloAction": None}
     assert doc["summary"]["missing"]["21"] == ["identity", "locomotion", "soloAction"]
     assert doc["summary"]["requested"] == 2

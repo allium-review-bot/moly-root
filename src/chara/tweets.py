@@ -44,6 +44,7 @@ def _tweet_body(row):
         "motion": row.get("motionName"),
         "eye": row.get("expressionEyeName"),
         "mouth": row.get("expressionMouthName"),
+        "emoticon": row.get("emoticonName"),
     }
 
 
@@ -103,12 +104,14 @@ def extract_tweets(master_source, out_path, master_cache=None):
             raise LookupError(f"unit {unit}: pool names absent tweets {absent}")
 
     doc = {
-        "version": 1,
+        "version": 2,
         "semantics": {
             "tweets": (
                 "keyed by tweet id; text is the master row's own text, "
                 "unmodified, newlines included; motion/eye/mouth are the "
-                "motion and facial pattern names the master row pairs with it"
+                "motion and facial pattern names the master row pairs with it; "
+                "emoticon is the overhead-item name the row may trigger "
+                "(null when the row names none)"
             ),
             "afterEditPools": (
                 "keyed by gameCharacterUnitId; the tweet ids the source's "
@@ -123,6 +126,8 @@ def extract_tweets(master_source, out_path, master_cache=None):
         "afterEditPools": pools,
         "summary": {
             "tweets": len(by_id),
+            "tweetsWithEmoticon": sum(1 for body in by_id.values()
+                                      if body["emoticon"]),
             "withoutRelatedTalkRows": len(unit_of),
             "afterEditRows": len(after_edit),
             "unitsWithAfterEditPool": len(pools),

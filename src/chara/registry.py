@@ -36,6 +36,10 @@ SEMANTICS = {
     "missingSource": ("a character whose identity / locomotion / soloAction row is "
                       "absent gets `null` there and is listed in summary.missing — "
                       "absent is never filled with a default"),
+    "name": ("display name joined from the character row through identity's "
+             "gameCharacterId: firstName + givenName, skipping absent parts; "
+             "null when the character row is absent — the caller decides how to "
+             "label a nameless unit, this module never invents one"),
     "storedVsRuntime": ("the runtime divides pauseMilliSeconds, "
                         "changeMotionMilliSeconds, walkSpeed and runSpeed by 1000; "
                         "both forms are given and the runtime form is the one to use"),
@@ -46,6 +50,15 @@ SEMANTICS = {
     "soloAction": ("script name of this character's alone-action performance; the "
                    "scripts themselves live in their own bundle"),
 }
+
+
+def _display_name(row):
+    """firstName + givenName with absent parts skipped; None when both are."""
+    if not row:
+        return None
+    parts = [row.get("firstName"), row.get("givenName")]
+    joined = "".join(p for p in parts if p)
+    return joined or None
 
 
 def _derive(row):
@@ -64,11 +77,15 @@ def build_registry(master, unit_ids, motion_library_index=None, client_configs=_
     *client_configs* is omitted, it is read from the master; callers that need
     local fault isolation may pass ``None`` when that table is unavailable.
     """
+    from core.master import MissingTable
     identity = master.character_units()
     locomotion = master.locomotion()
     solo = master.solo_actions()
+    try:
+        game_characters = master.game_characters()
+    except MissingTable:
+        game_characters = None
     if client_configs is _CONFIG_UNSET:
-        from core.master import MissingTable
         try:
             client_configs = master.client_configs()
         except MissingTable:
@@ -83,8 +100,11 @@ def build_registry(master, unit_ids, motion_library_index=None, client_configs=_
                                        ("soloAction", solo.get(unit))) if row is None]
         if gaps:
             missing[str(unit)] = gaps
+        name = _display_name(game_characters.get(ident_row["gameCharacterId"])
+                             if (game_characters and ident_row) else None)
         entry = {
             "unitId": unit,
+            "name": name,
             "identity": ({f: ident_row.get(f) for f in IDENTITY_FIELDS}
                          if ident_row else None),
             "locomotion": None,
@@ -139,6 +159,7 @@ def build_registry(master, unit_ids, motion_library_index=None, client_configs=_
         "summary": {
             "requested": len(set(unit_ids)),
             "withIdentity": sum(1 for c in characters.values() if c["identity"]),
+            "withName": sum(1 for c in characters.values() if c["name"]),
             "withLocomotion": sum(1 for c in characters.values() if c["locomotion"]),
             "withSoloAction": sum(1 for c in characters.values() if c["soloAction"]),
             "missing": missing,

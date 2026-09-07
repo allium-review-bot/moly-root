@@ -131,6 +131,11 @@ class Master:
         """{unitId: identity row} — colours and unit name of each character."""
         return {row["id"]: row for row in self.table("gameCharacterUnits")}
 
+    def game_characters(self):
+        """{gameCharacterId: character row} — display names live here, not in
+        the unit rows above; one character row feeds many unit variants."""
+        return {row["id"]: row for row in self.table("gameCharacters")}
+
     # -- locomotion -------------------------------------------------------
 
     def locomotion(self):

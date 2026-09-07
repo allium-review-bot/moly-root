@@ -141,7 +141,11 @@ cloth 包含坐标系、版本声明、组件、碰撞体、统计和结构检�
 | `lua` | 脚本名。脚本本体在对话脚本包里（全部对话共用一个包），包内资产名比这里**多一个 `.lua` 后缀**。 |
 | `siteGroupId` / `termId` | 站点组与时段；取值语义未取证，原样给出。 |
 | `conditions` | 该对话条件组里的条件类型（家具型的对话已被判据排除，所以这里只会出现现象、访问次数、活动剧情三类）。 |
-| `tweet` | `{id, text, motion, eye, mouth}`；`text` 是原文含 `\n`。**这是除独处编排之外的第二处「动作↔表情」配对来源。** |
+| `tweet` | `{id, text, motion, eye, mouth, emoticon}`；`text` 是原文含 `\n`。**这是除独处编排之外的第二处「动作↔表情」配对来源。** |
+
+选链三主表在 `tweet-tables.json`（与 `tweets.json` 同源 master 链，非 bundle 产物）：
+`withoutRelatedTalks` 660 · `greetings` 180（含 `greetingConditions` 6——恰两个已知条件类型）
+· `siteEntries` 90 · `talkPreActions` 6180。**行序 = master 表序**（序是数据的一部分，消费方不得按键重排）。
 | `voices` | 脚本里引用的语音 cue 名。**语音字节不在这个包里**，本仓也不提供 cue 到语音包的映射（未取证）。 |
 | `steps` | 按脚本顺序解析出的编排步骤，每步带 `op`。 |
 
