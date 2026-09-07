@@ -60,7 +60,7 @@ let lastFrameInfo = { calls: 0, triangles: 0 };
 view.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x14151c);
+scene.background = new THREE.Color(0x141312);   // 与 ui.css 的 --bg-stage 同值
 // 远平面要装得下天空网格:它是产物里那一个,离自己的原点最远约 660,而它每帧钉在相机脚下。
 const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 1000);
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -99,7 +99,7 @@ const _freeEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 const _freeForward = new THREE.Vector3();
 const _freeRight = new THREE.Vector3();
 const _freeMove = new THREE.Vector3();
-const grid = new THREE.GridHelper(4, 16, 0x2c2f3d, 0x21232e);
+const grid = new THREE.GridHelper(4, 16, 0x2e2a23, 0x211f1a);
 scene.add(grid);
 scene.add(camera);   // 相机族环境粒子挂在相机下,相机必须在场景图里
 
@@ -136,6 +136,32 @@ let perfMode = 'faithful';                // faithful=按编排的时间门+概�
 // 「自动演出」(默认开)只管空闲时段:idle 时编排按策略自动选取下一个场景;
 // 手动点播的场景播放期间它不插手,播完后照常接续。
 let perfAuto = true;
+
+// ---- 角色名(可选数据:characters.json 的 name 字段) ----
+// 名字由提取器从主表写进 characters.json;这份文件缺行/缺字段/整份缺失时,
+// 一律回退到 sd_<代号> 展示 —— 代号是唯一的自备真值,这里从不造名字。
+// 重名(虚拟歌手的各组合变体同名)时以组合 slug 作限定,限定只在重名集合里出现。
+let unitNames = new Map();                // unitId(=代号-100) -> 显示名
+let unitSlugs = new Map();                // unitId -> 组合 slug(重名限定用)
+let dupNames = new Set();                 // 本名单内出现多于一次的名字
+function unitLabel(unit) {
+  const name = unitNames.get(unit - 100);
+  if (!name) return { name: `sd_${unit}`, full: `sd_${unit}`, code: true };
+  const slug = unitSlugs.get(unit - 100);
+  const dup = dupNames.has(name) && slug;
+  return { name, full: dup ? `${name}(${slug})` : name, code: false, dup };
+}
+function adoptRegistry(reg) {
+  const characters = (reg && reg.characters) || {};
+  const counts = new Map();
+  for (const [id, entry] of Object.entries(characters)) {
+    if (!entry || !entry.name) continue;
+    unitNames.set(+id, entry.name);
+    if (entry.identity && entry.identity.unit) unitSlugs.set(+id, entry.identity.unit);
+    counts.set(entry.name, (counts.get(entry.name) || 0) + 1);
+  }
+  for (const [name, n] of counts) if (n > 1) dupNames.add(name);
+}
 
 function syncPerfUI() {
   const b = $('bAutoPerf');
@@ -620,7 +646,7 @@ function enableEnv(on) {
   } else {
     environment.detach();
     grid.visible = true;
-    scene.background = new THREE.Color(0x14151c);
+    scene.background = new THREE.Color(0x141312);
     // 交还光照:把面板上的角度与日/夜色重新推给角色材质。
     if (current) {
       Shading.setNight(current.mats, night);
@@ -727,14 +753,19 @@ function disposeCurrent() {
 
 async function loadUnit(unit) {
   const entry = unitList.find((u) => u.unit === unit) || { unit, glb: `sd_${unit}.glb`, rig: `sd_${unit}.rig.json`, clips: null };
-  hudStatus(`sd_${unit} 载入中…`);
+  const label = unitLabel(unit);
+  hudStatus(`${label.full} 载入中…`);
+  window.dispatchEvent(new CustomEvent('viewer:loading',
+    { detail: { unit, name: label.code ? null : label.name, full: label.full, phase: 'start' } }));
   document.querySelectorAll('#list .uchip').forEach((r) => r.classList.toggle('on', +r.dataset.u === unit));
 
   let gltf;
   try {
     gltf = await loader.loadAsync(`${BASE}/${entry.glb}`);
   } catch (e) {
-    hudStatus(`<span class="bad">sd_${unit} 载入失败</span> ${String(e).slice(0, 160)}`);
+    window.dispatchEvent(new CustomEvent('viewer:loading',
+      { detail: { unit, name: label.code ? null : label.name, full: label.full, phase: 'error', message: `${label.full} 载入失败` } }));
+    hudStatus(`<span class="bad">${label.full} 载入失败</span> ${String(e).slice(0, 160)}`);
     return;
   }
   const rigRaw = await fetchJson(`${BASE}/${entry.rig}`);
@@ -1038,6 +1069,8 @@ async function loadUnit(unit) {
   const emoWant = params.get('emoteitem');   // 直达单条气泡:检查或截图不用等编排掷到它
   if (emoWant) playEmoticon(emoWant);
   refreshHud(0);
+  window.dispatchEvent(new CustomEvent('viewer:unit',
+    { detail: { unit, name: label.code ? null : label.name, full: label.full } }));
 }
 
 // ---- 相机 ----
@@ -1216,6 +1249,14 @@ function fitCamera(obj) {
   controls.update();
 }
 
+// ---- 外壳入口(shell.js 消费) ----
+// 截图必须在渲染完成后的同一个任务里同步取帧,否则 drawing buffer 已被清空
+// (为此开 preserveDrawingBuffer 全帧常驻不划算),所以钩子长在帧循环的末尾。
+app.recenter = () => { if (current) fitCamera(current.root); };
+let shotPending = false;
+app.requestScreenshot = () => { shotPending = true; };
+app.onShot = null;
+
 // ---- UI ----
 function hudStatus(html) { $('status').innerHTML = html; }
 
@@ -1249,11 +1290,16 @@ function buildUnitList() {
   const box = $('list');
   box.innerHTML = '';
   for (const u of unitList) {
+    const L = unitLabel(u.unit);
     const d = document.createElement('button');   // 用 button:Tab 能走到,回车/空格即触发
     d.type = 'button';
     d.className = 'uchip'; d.dataset.u = u.unit;
-    d.textContent = u.unit;
-    d.title = `sd_${u.unit} · unit ${u.unit - 100}`;
+    // 代号永远可查(data-key 参与筛选),名字在时它退居次行
+    d.dataset.key = `sd_${u.unit}${L.dup ? ` ${L.name} ${unitSlugs.get(u.unit - 100)}` : ''}`;
+    d.dataset.who = L.full;
+    d.innerHTML = L.code ? `${u.unit}`
+      : (L.dup ? `${L.name}<small>${unitSlugs.get(u.unit - 100)}</small>` : L.name);
+    d.title = `sd_${u.unit} · unit ${u.unit - 100}${L.code ? '' : ` · ${L.full}`}`;
     d.onclick = () => loadUnit(u.unit);
     box.appendChild(d);
   }
@@ -1664,7 +1710,7 @@ function refreshHud(dt) {
   const f = current.facial;
   const em = current.emote && current.emoticon ? current.emoticon.stats() : null;
   hudStatus(
-    `<span class="cell"><span class="v unit">sd_${current.unit}</span></span>`
+    `<span class="cell"><span class="v unit">${unitLabel(current.unit).full}</span></span>`
     + cell('perf', `<span class="dim">${fps.toFixed(0)} fps · ${info.calls} calls · ${info.triangles} tris</span>`)
     + cell('动作', `<span class="${current.segctl && current.segctl.phase !== 'idle' ? 'ok' : 'dim'}">${$('phase').textContent}</span>`)
     + cell('布料', cs
@@ -1770,6 +1816,13 @@ renderer.setAnimationLoop(() => {
   // 绘制之后拍一份整帧统计给 HUD 用。HUD 在绘制**之前**刷新(它要用同一帧的 dt),
   // 而 autoReset 关着、计数器在帧首清零 —— 直接读就永远是 0。读上一帧的快照才是整帧真值。
   lastFrameInfo = { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles };
+  if (shotPending) {
+    shotPending = false;
+    try {
+      const url = renderer.domElement.toDataURL('image/png');
+      if (app.onShot) app.onShot(url);
+    } catch (e) { console.error('[shot]', e); }
+  }
 });
 
 function resize() {
@@ -1805,6 +1858,12 @@ $('bCheckMotion').onclick = () => {
   fillFacialSelects(0);
   app.dataInfo.tables = tables.counts;
   app.dataInfo.tablesFallback = !!tables.fallback;
+
+  // 角色名:characters.json 的 name 字段(提取器从主表写入;可选数据,
+  // 老部署/老缓存没有它时全部回退 sd_ 代号)。与 manifest 并行取,谁先到都行。
+  const registryRaw = await fetchJson(`${BASE}/characters.json`);
+  adoptRegistry(registryRaw);
+  app.dataInfo.names = unitNames.size;
 
   manifest = await fetchJson(`${BASE}/manifest.json`);
   if (manifest && Array.isArray(manifest.units) && manifest.units.length) {

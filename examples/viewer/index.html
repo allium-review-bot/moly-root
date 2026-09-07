@@ -1,204 +1,263 @@
 <!DOCTYPE html>
+<html lang="zh-CN">
+<head>
 <meta charset="utf-8">
-<title>demo</title>
-<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzE3MWEyMScvPjxjaXJjbGUgY3g9JzE2JyBjeT0nMTYnIHI9JzYuNScgZmlsbD0nIzc5YTZmNicvPjwvc3ZnPg==">
-<link rel="stylesheet" href="./ui.css?v=4">
-<!-- 结构说明:左栏=角色网格 + 表演场景列表(主入口) + 播放控制 + 折叠的动作库;
-     中间=画面 + 状态条(状态条走文档流,画面上零浮层);右栏=旋钮(短、固定)。 -->
-<div id="shell">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chara alpha — moly viewer</title>
+<link rel="icon" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMic+PHJlY3Qgd2lkdGg9JzMyJyBoZWlnaHQ9JzMyJyByeD0nNycgZmlsbD0nIzE3MTUxMicvPjxjaXJjbGUgY3g9JzE2JyBjeT0nMTYnIHI9JzYuNScgZmlsbD0nI2QzYWE2ZicvPjwvc3ZnPg==">
+<link rel="stylesheet" href="./ui.css?v=5">
+</head>
+<body>
 
-  <aside class="rail" id="railL">
-    <div id="brand">
-      <h1>demo</h1>
-      <details class="note">
-        <summary>规格</summary>
-        <div class="body">toon 着色 · 眉眼透发(stencil)· 眨眼口型 · 布料实时物理 · S→L→E 段衔接 ·
-          头顶气泡(emoticon)<br>规格:公开数据契约与运行时示例</div>
-      </details>
+<!-- 结构说明:画布全幅铺满窗口,是页面的绝对主角。
+     左右两块浮岛面板悬浮在画面上,可整体收起;顶栏一条、状态条一条。
+     所有控件 id 与 viewer.js / selfcheck.js 的接线保持不变。 -->
+
+<!-- 舞台:渲染画布。selfcheck 的布局判据读 #view 的尺寸,$id 不改。 -->
+<main id="stage"><div id="view"></div></main>
+
+<!-- 载入幕帘:盖住启动期与换角色的加载过程,就绪后由 shell.js 收起 -->
+<div id="loadveil">
+  <div class="veil-card">
+    <div class="veil-word">moly</div>
+    <div class="veil-sub">chara viewer</div>
+    <div class="veil-status" id="veilStatus">正在准备…</div>
+    <div class="veil-bar"><i></i></div>
+  </div>
+</div>
+
+<!-- 顶栏:身份 + 当前角色 + 全局工具 -->
+<header id="topbar" class="chrome">
+  <button id="bDockL" class="tool" type="button" title="演出台 (面板)" aria-pressed="true" aria-controls="railL">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M6.5 2.5v11"/><path class="fill" d="M2.5 4.5a1 1 0 0 1 1-1h2v9h-2a1 1 0 0 1-1-1z"/></svg>
+  </button>
+  <div class="brand">
+    <span class="wordmark">moly</span>
+    <span class="alpha-badge" title="alpha:功能仍在演进,外观与交互可能调整">alpha</span>
+    <span class="brand-sep" aria-hidden="true"></span>
+    <span class="brand-sub">chara viewer</span>
+  </div>
+  <div class="now" title="当前角色">
+    <span class="now-k">now</span>
+    <b class="now-unit" id="nowUnit">—</b>
+  </div>
+  <div class="tools">
+    <button id="bRecenter" class="tool" type="button" title="相机对准角色">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.2"/><path d="M8 1.2v2.4M8 12.4v2.4M1.2 8h2.4M12.4 8h2.4"/></svg>
+    </button>
+    <button id="bShot" class="tool" type="button" title="截图保存为 PNG (P)">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.8 5.2A1.7 1.7 0 0 1 3.5 3.5h1.6l1.1-1.5h3.6l1.1 1.5h1.6a1.7 1.7 0 0 1 1.7 1.7v6a1.7 1.7 0 0 1-1.7 1.7h-9a1.7 1.7 0 0 1-1.7-1.7z"/><circle cx="8" cy="8.2" r="2.4"/></svg>
+    </button>
+    <button id="bChrome" class="tool" type="button" title="纯净模式:隐藏全部界面 (H)">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.8 5V3.5A1.7 1.7 0 0 1 3.5 1.8H5M11 1.8h1.5a1.7 1.7 0 0 1 1.7 1.7V5M14.2 11v1.5a1.7 1.7 0 0 1-1.7 1.7H11M5 14.2H3.5a1.7 1.7 0 0 1-1.7-1.7V11"/></svg>
+    </button>
+    <button id="bHelp" class="tool" type="button" title="帮助与快捷键 (?)">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M6.2 6.1c.2-1 1-1.6 1.9-1.6 1 0 1.9.7 1.9 1.7 0 1.5-1.9 1.5-1.9 3"/><circle cx="8" cy="11.6" r=".9" class="dot"/></svg>
+    </button>
+  </div>
+  <button id="bDockR" class="tool" type="button" title="检查面板 (面板)" aria-pressed="true" aria-controls="railR">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M9.5 2.5v11"/><path class="fill" d="M10.5 3.5h2a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-2z"/></svg>
+  </button>
+</header>
+
+<!-- 演出台(左):角色 · 表演场景 · 播放控制。selfcheck 只认 #railL/#railR 的 #railR,左栏 id 保留同形 -->
+<aside id="railL" class="dock chrome">
+  <div class="dock-head">
+    <h2>演出台</h2><span class="dock-sub">performance</span>
+  </div>
+
+  <section class="sec" id="gUnits">
+    <header class="sec-head"><h3>角色</h3><span class="count" id="unitCount"></span></header>
+    <div class="filter">
+      <input id="unitFilter" class="field" type="search" placeholder="筛角色编号" aria-label="筛选角色">
     </div>
+    <!-- 编号网格:单击切换,当前项高亮 -->
+    <div class="list ugrid" id="list" aria-label="角色列表"><div class="empty">载入中…</div></div>
+  </section>
 
-    <section class="group" id="gUnits">
-      <h2>角色<span class="count" id="unitCount"></span></h2>
-      <!-- 编号网格:31 个角色一屏全见,单击切换,当前项高亮 -->
-      <div class="list ugrid" id="list" aria-label="角色列表"><div class="empty">载入中…</div></div>
-    </section>
+  <section class="sec grow" id="gPerf">
+    <header class="sec-head"><h3>表演场景</h3><span class="count" id="scnCount"></span></header>
+    <div class="row-ctl">
+      <button id="bAutoPerf" class="btn toggle on" type="button"
+        title="空闲时按策略自动演出;手动点播的场景播放完毕后接续">自动演出</button>
+      <select id="selPerfMode" class="field"
+        title="自动演出的选取策略:按原始策略=源数据的时间门与概率(多数时间待机);轮播=依次播放每个场景">
+        <option value="faithful">按原始策略</option>
+        <option value="cycle">轮播</option>
+      </select>
+    </div>
+    <div class="hintline dim" id="perfHint">&nbsp;</div>
+    <div class="filter">
+      <input id="scnFilter" class="field" type="search" placeholder="筛场景" aria-label="筛选表演场景">
+    </div>
+    <!-- 一行一个表演场景:点击=完整播放一遍(动作×表情×气泡),播完即停 -->
+    <div class="list scroll" id="scenarios" aria-label="表演场景列表"><div class="empty">载入中…</div></div>
+  </section>
 
-    <section class="group" id="gPerf">
-      <h2>表演场景<span class="count" id="scnCount"></span></h2>
-      <div class="controls">
-        <button id="bAutoPerf" class="btn toggle on" type="button"
-          title="空闲时按策略自动演出;手动点播的场景播放完毕后接续">自动演出</button>
-        <select id="selPerfMode" class="field"
-          title="自动演出的选取策略:按原始策略=源数据的时间门与概率(多数时间待机);轮播=依次播放每个场景">
-          <option value="faithful">自动:按原始策略</option>
-          <option value="cycle">自动:轮播</option>
-        </select>
-      </div>
-      <div class="hintline dim" id="perfHint">&nbsp;</div>
-      <div class="filter mt">
-        <input id="scnFilter" class="field" type="search" placeholder="筛场景" aria-label="筛选表演场景">
-      </div>
-      <!-- 一行一个表演场景:点击=完整播放一遍(动作×表情×气泡),播完即停 -->
-      <div class="list" id="scenarios" aria-label="表演场景列表"><div class="empty">载入中…</div></div>
-    </section>
-
-    <section class="group" id="gCtl">
-      <h2>播放控制</h2>
-      <div class="controls">
-        <button id="bPlay" class="btn toggle on" type="button">暂停</button>
-        <button id="bStop" class="btn" type="button" title="L 段 crossFade 0.5s 进 E 段">停止→E</button>
-        <button id="bCloth" class="btn toggle on" type="button">物理</button>
-        <button id="bClothReset" class="btn" type="button">重置物理</button>
-      </div>
-      <div class="controls" aria-label="相机模式">
-        <span class="k">相机:<b id="cameraModeLabel">轨道</b></span>
+  <section class="sec foot" id="gCtl">
+    <div class="row-ctl">
+      <button id="bPlay" class="btn toggle on" type="button">暂停</button>
+      <button id="bStop" class="btn" type="button" title="L 段 crossFade 0.5s 进 E 段">停止→E</button>
+      <button id="bCloth" class="btn toggle on" type="button" title="布料实时物理">物理</button>
+      <button id="bClothReset" class="btn" type="button" title="布料复位">↺</button>
+    </div>
+    <div class="row-ctl">
+      <span class="k">相机 <b id="cameraModeLabel">轨道</b></span>
+      <span class="seg" role="group" aria-label="相机模式">
         <button id="bCameraOrbit" class="btn toggle on" type="button">轨道</button>
         <button id="bCameraFree" class="btn toggle" type="button">自由</button>
-      </div>
-      <div id="cameraHint" class="hintline dim">拖拽旋转 · 滚轮缩放</div>
-      <div class="controls">
-        <label class="slider"><span class="k">速度</span>
-          <input id="rSpeed" type="range" min="0" max="200" value="100" aria-label="播放速度">
-          <output id="oSpeed">1.00×</output>
-        </label>
-      </div>
-    </section>
-
-  </aside>
-
-  <main id="stage">
-    <div id="view"></div>
-    <div id="hud">
-      <div id="status">载入中…</div>
-      <div class="hint">拖拽旋转 · 滚轮缩放</div>
-      <span id="phase" hidden>—</span>
+      </span>
     </div>
-  </main>
+    <label class="slider"><span class="k">速度</span>
+      <input id="rSpeed" type="range" min="0" max="200" value="100" aria-label="播放速度">
+      <output id="oSpeed">1.00×</output>
+    </label>
+    <div id="cameraHint" class="hintline dim">拖拽旋转 · 滚轮缩放</div>
+  </section>
+</aside>
 
-  <aside class="rail" id="railR">
-    <section class="group" id="gEnv">
-      <h2>环境<span class="count" id="envCount"></span></h2>
-      <!-- 15 个现象:图标网格,单击切换(0.25 秒交叉淡化);当前项高亮 -->
-      <div class="list egrid" id="envList" aria-label="现象列表"><div class="empty">载入中…</div></div>
-      <div class="hintline dim" id="envHint">&nbsp;</div>
-      <div class="controls mt">
-        <button id="bEnv" class="btn toggle" type="button"
-          title="环境层:天空/光照/雾/云影/粒子/后处理(关掉回到默认外观)">环境层</button>
-        <button id="bEnvIndoor" class="btn toggle" type="button"
-          title="用带覆盖的那个站点(室内):配置与后处理走两级查找的第一级">室内覆盖</button>
+<!-- 检查面板(右):五个页签收纳全部旋钮。selfcheck 布局判据读 #railR 的位置,id 不改 -->
+<aside id="railR" class="dock chrome">
+  <nav class="tabs" id="tabs" aria-label="检查面板页签">
+    <button class="tab on" type="button" data-tab="env">环境</button>
+    <button class="tab" type="button" data-tab="look">光影</button>
+    <button class="tab" type="button" data-tab="face">表演</button>
+    <button class="tab" type="button" data-tab="clips">动作</button>
+    <button class="tab" type="button" data-tab="diag">诊断</button>
+  </nav>
+
+  <div class="panes">
+    <!-- 环境页:现象网格 + 环境层旋钮 + 站点 + 时间轴 + 音频 -->
+    <section class="pane on" data-pane="env">
+      <div class="sec">
+        <header class="sec-head"><h3>现象</h3><span class="count" id="envCount"></span></header>
+        <!-- 15 个现象:图标网格,单击切换(0.25 秒交叉淡化);当前项高亮 -->
+        <div class="list egrid" id="envList" aria-label="现象列表"><div class="empty">载入中…</div></div>
+        <div class="hintline dim" id="envHint">&nbsp;</div>
+        <div class="row-ctl mt">
+          <button id="bEnv" class="btn toggle" type="button"
+            title="环境层:天空/光照/雾/云影/粒子/后处理(关掉回到默认外观)">环境层</button>
+          <button id="bEnvIndoor" class="btn toggle" type="button"
+            title="用带覆盖的那个站点(室内):配置与后处理走两级查找的第一级">室内覆盖</button>
+        </div>
+        <div class="row-ctl">
+          <button id="bEnvParticles" class="btn toggle on" type="button"
+            title="现象粒子(天空族挂世界、相机族跟相机、站点族挂世界)">粒子</button>
+          <button id="bEnvPost" class="btn toggle on" type="button"
+            title="后处理链:粒子泛光 → 泛光 → 扩散 → 耀斑 → 白平衡 → 颜色调整 → 分离色调">后处理</button>
+          <button id="bEnvSky" class="btn toggle on" type="button" title="天空可见性">天空</button>
+          <button id="bEnvGround" class="btn toggle on" type="button" title="站点几何的可见性">站点</button>
+        </div>
       </div>
-      <div class="controls">
-        <button id="bEnvParticles" class="btn toggle on" type="button"
-          title="现象粒子(天空族挂世界、相机族跟相机、站点族挂世界)">环境粒子</button>
-        <button id="bEnvPost" class="btn toggle on" type="button"
-          title="后处理链:粒子泛光 → 泛光 → 扩散 → 耀斑 → 白平衡 → 颜色调整 → 分离色调">后处理</button>
+      <div class="sec">
+        <header class="sec-head"><h3>站点</h3></header>
+        <div class="col-ctl">
+          <select id="selEnvSite" class="field"
+            title="换站点:真站点几何 + 站点粒子挂哪一站。一行一个站点,不是一行一个场景包:室内那一个场景包承载三个站点(1/2/3 楼),三行只差 placement 表给的世界位置。室内/室外由站点产物判(室内不挂天气特效与天空)"></select>
+          <!-- 室内等级:房间由套件按等级模块拼装。等级本身在 master 表里(本仓没有),
+               所以做成面板下发,默认取产物里最高的一级。 -->
+          <select id="selEnvLevel" class="field"
+            title="室内房间等级:房间 = 该级扩张模块摆出来的套件网格 + 该级的可走面。名单 = 产物里的扩张模块等级 ∩ placement 表里这一站开放的等级(2 楼与 3 楼只开放 5 级);当前是第几级由服务端决定,所以做成面板下发"></select>
+          <!-- 站点这一族八个程序都写两个渲染目标:颜色与发光。
+               发光缓冲与粒子特效缓冲相加后一起进泛光金字塔;泛光关着时它不进。 -->
+          <select id="selEnvEmission" class="field"
+            title="站点的第二个渲染目标(发光):不产 / 每帧产一张缓冲 / 把缓冲直显到屏幕。产出态下它与粒子特效缓冲相加后经泛光进主目标;直显是查看手段,不是原版通路">
+            <option value="off">发光缓冲:不产</option>
+            <option value="buffer" selected>发光缓冲:产出</option>
+            <option value="view">发光缓冲:直显</option>
+          </select>
+        </div>
+        <div class="hintline dim" id="envSiteHint">&nbsp;</div>
       </div>
-      <div class="controls">
-        <button id="bEnvSky" class="btn toggle on" type="button" title="天空可见性">天空</button>
-        <button id="bEnvGround" class="btn toggle on" type="button" title="站点几何的可见性">站点</button>
-      </div>
-      <div class="controls">
-        <select id="selEnvSite" class="field"
-          title="换站点:真站点几何 + 站点粒子挂哪一站。**一行一个站点,不是一行一个场景包**:室内那一个场景包承载三个站点(1/2/3 楼),三行只差 placement 表给的世界位置。室内/室外由站点产物判(室内不挂天气特效与天空)"></select>
-      </div>
-      <!-- 室内等级:房间由套件按等级模块拼装。等级本身在 master 表里(本仓没有),
-           所以做成面板下发,默认取产物里最高的一级。 -->
-      <div class="controls">
-        <select id="selEnvLevel" class="field"
-          title="室内房间等级:房间 = 该级扩张模块摆出来的套件网格 + 该级的可走面。名单 = 产物里的扩张模块等级 ∩ placement 表里这一站开放的等级(2 楼与 3 楼只开放 5 级);当前是第几级由服务端决定,所以做成面板下发"></select>
-      </div>
-      <!-- 站点这一族八个程序**都写两个渲染目标**:第一个是颜色,第二个是发光。
-           只有 Object 与 Fixture/Basic 会往第二个写非零值。这块缓冲与粒子特效缓冲相加后
-           一起进泛光金字塔(真源里两者写同一块 effectRT),所以发光**经泛光那一路**进主目标;
-           泛光那一支关着时它不进。 -->
-      <div class="controls">
-        <select id="selEnvEmission" class="field"
-          title="站点的第二个渲染目标(发光):不产 / 每帧产一张缓冲 / 把缓冲直显到屏幕。产出态下它与粒子特效缓冲相加后经泛光进主目标;直显是查看手段,不是原版通路">
-          <option value="off">发光缓冲:不产</option>
-          <option value="buffer" selected>发光缓冲:产出</option>
-          <option value="view">发光缓冲:直显</option>
-        </select>
-      </div>
-      <div class="hintline dim" id="envSiteHint">&nbsp;</div>
-      <!-- 现象时间轴:打雷天那一下亮就出自它(天空与光的附加色/附加强度)。
-           暂停 + 拖时刻 = 定点观测同一拍。 -->
-      <div class="controls">
-        <button id="bEnvTimeline" class="btn toggle on" type="button"
-          title="现象时间轴:按现象自己的时长循环播放(打雷天的闪光由它驱动);关掉 = 停在当前这一拍">时间轴</button>
-        <button id="bEnvTimelineReset" class="btn" type="button" title="时间轴复位到 0 秒">复位</button>
-      </div>
-      <div class="controls">
+      <div class="sec">
+        <header class="sec-head"><h3>现象时间轴</h3></header>
+        <!-- 现象时间轴:打雷天那一下亮就出自它。暂停 + 拖时刻 = 定点观测同一拍。 -->
+        <div class="row-ctl">
+          <button id="bEnvTimeline" class="btn toggle on" type="button"
+            title="现象时间轴:按现象自己的时长循环播放(打雷天的闪光由它驱动);关掉 = 停在当前这一拍">播放</button>
+          <button id="bEnvTimelineReset" class="btn" type="button" title="时间轴复位到 0 秒">复位</button>
+        </div>
         <label class="slider"><span class="k">时刻</span>
           <input id="rEnvTimeline" type="range" min="0" max="1000" value="0" aria-label="时间轴时刻">
           <output id="oEnvTimeline">—</output>
         </label>
+        <div class="hintline dim" id="envTlHint">&nbsp;</div>
       </div>
-      <div class="hintline dim" id="envTlHint">&nbsp;</div>
-    </section>
-
-    <section class="group" id="gAudio">
-      <h2>音频<span class="count" id="audioCount"></span></h2>
-      <!-- 现象音频:按产物行的律路由(现象 bgms / siteSounds,站点底层 siteBgms /
-           siteSoundFallbacks);循环点由产物直接给出。开关是真实播放手势。 -->
-      <div class="controls">
-        <button id="bAudio" class="btn toggle" type="button"
-          title="现象音频:先选现象与站点,再点这里开(浏览器自动播放策略要求的第一次手势)">音频</button>
-        <label class="slider"><span class="k">音量</span>
-          <input id="rAudio" type="range" min="0" max="100" value="100" aria-label="音量">
-          <output id="oAudio">100%</output>
-        </label>
-      </div>
-      <div class="hintline dim" id="audioHint">&nbsp;</div>
-    </section>
-
-    <section class="group">
-      <h2>外观与光照</h2>
-      <div class="controls">
-        <button id="bNight" class="btn toggle" type="button">夜间</button>
-        <button id="bWire" class="btn toggle" type="button">线框</button>
-      </div>
-      <div class="controls">
-        <select id="selDebug" class="field" title="着色诊断(定位色差属于哪一层)">
-          <option value="0">着色:正常</option>
-          <option value="1">诊断:无阴影</option>
-          <option value="2">诊断:无球面影</option>
-          <option value="3">诊断:分支可视化</option>
-        </select>
-      </div>
-      <div class="stack mt">
-        <label class="slider"><span class="k">方位</span>
-          <input id="rLightXZ" type="range" min="0" max="360" value="48" title="方位角(默认 48°)" aria-label="光照方位角">
-          <output id="oLightXZ">48°</output>
-        </label>
-        <label class="slider"><span class="k">仰角</span>
-          <input id="rLightY" type="range" min="-10" max="89" value="30" title="仰角(默认 30°)" aria-label="光照仰角">
-          <output id="oLightY">30°</output>
-        </label>
-        <div class="controls">
-          <button id="bLightReset" class="btn" type="button" title="恢复默认 48°/30°">光复位</button>
+      <div class="sec">
+        <header class="sec-head"><h3>音频</h3><span class="count" id="audioCount"></span></header>
+        <!-- 现象音频:按产物行的律路由;循环点由产物直接给出。开关是真实播放手势。 -->
+        <div class="row-ctl">
+          <button id="bAudio" class="btn toggle" type="button"
+            title="现象音频:先选现象与站点,再点这里开(浏览器自动播放策略要求的第一次手势)">音频</button>
+          <label class="slider grow"><span class="k">音量</span>
+            <input id="rAudio" type="range" min="0" max="100" value="100" aria-label="音量">
+            <output id="oAudio">100%</output>
+          </label>
         </div>
-        <div class="hintline dim" id="lightHint">&nbsp;</div>
+        <div class="hintline dim" id="audioHint">&nbsp;</div>
       </div>
     </section>
 
-    <section class="group">
-      <h2>表情与头顶件</h2>
-      <div class="controls">
-        <button id="bBlink" class="btn toggle on" type="button">眨眼</button>
-        <button id="bSpeak" class="btn toggle" type="button">说话</button>
+    <!-- 光影页:外观开关 + 着色诊断 + 光向 -->
+    <section class="pane" data-pane="look">
+      <div class="sec">
+        <header class="sec-head"><h3>外观</h3></header>
+        <div class="row-ctl">
+          <button id="bNight" class="btn toggle" type="button" title="夜间光色">夜间</button>
+          <button id="bWire" class="btn toggle" type="button" title="线框">线框</button>
+        </div>
+        <div class="col-ctl mt">
+          <select id="selDebug" class="field" title="着色诊断(定位色差属于哪一层)">
+            <option value="0">着色:正常</option>
+            <option value="1">诊断:无阴影</option>
+            <option value="2">诊断:无球面影</option>
+            <option value="3">诊断:分支可视化</option>
+          </select>
+        </div>
       </div>
-      <!-- 眼口标签(表情表的行):选择即应用,眨眼/说话机取所选行的开合格;检查工具,选择时停用自动演出 -->
-      <div class="controls">
-        <select id="selEye" class="field" title="眼型标签(表情表行);选择即应用并停用自动演出,眨眼取所选行的开/闭格"></select>
-        <select id="selMouth" class="field" title="口型标签(表情表行);选择即应用并停用自动演出,说话取所选行的开/闭格"></select>
+      <div class="sec">
+        <header class="sec-head"><h3>光向</h3></header>
+        <div class="stack">
+          <label class="slider"><span class="k">方位</span>
+            <input id="rLightXZ" type="range" min="0" max="360" value="48" title="方位角(默认 48°)" aria-label="光照方位角">
+            <output id="oLightXZ">48°</output>
+          </label>
+          <label class="slider"><span class="k">仰角</span>
+            <input id="rLightY" type="range" min="-10" max="89" value="30" title="仰角(默认 30°)" aria-label="光照仰角">
+            <output id="oLightY">30°</output>
+          </label>
+          <div class="row-ctl">
+            <button id="bLightReset" class="btn" type="button" title="恢复默认 48°/30°">光复位</button>
+          </div>
+          <div class="hintline dim" id="lightHint">&nbsp;</div>
+        </div>
       </div>
-      <div class="stack mt">
+    </section>
+
+    <!-- 表演页:眨眼/说话 + 眼口标签 + 头顶件 -->
+    <section class="pane" data-pane="face">
+      <div class="sec">
+        <header class="sec-head"><h3>表情状态机</h3></header>
+        <div class="row-ctl">
+          <button id="bBlink" class="btn toggle on" type="button">眨眼</button>
+          <button id="bSpeak" class="btn toggle" type="button">说话</button>
+        </div>
+        <!-- 眼口标签(表情表的行):选择即应用,眨眼/说话机取所选行的开合格;检查工具,选择时停用自动演出 -->
+        <div class="row-ctl mt">
+          <select id="selEye" class="field" title="眼型标签(表情表行);选择即应用并停用自动演出,眨眼取所选行的开/闭格"></select>
+          <select id="selMouth" class="field" title="口型标签(表情表行);选择即应用并停用自动演出,说话取所选行的开/闭格"></select>
+        </div>
+      </div>
+      <div class="sec">
+        <header class="sec-head"><h3>头顶件</h3></header>
         <!-- 53 个头顶件:输入即定位(不删 option,因为外部探针按 selEmoticon.value 直接指名) -->
-        <input id="emoFilter" class="field" type="search" placeholder="定位头顶件(↵ 下一个)" aria-label="定位头顶件">
-        <div id="emoMatch" class="hintline dim">&nbsp;</div>
-        <select id="selEmoticon" class="field"
-          title="fx_emote_* 条目(sprite=图集动画 view,particle=粒子 view)"></select>
-        <div class="controls">
+        <div class="col-ctl">
+          <input id="emoFilter" class="field" type="search" placeholder="定位头顶件(↵ 下一个)" aria-label="定位头顶件">
+          <div id="emoMatch" class="hintline dim">&nbsp;</div>
+          <select id="selEmoticon" class="field"
+            title="fx_emote_* 条目(sprite=图集动画 view,particle=粒子 view)"></select>
+        </div>
+        <div class="row-ctl mt">
           <button id="bEmoticonPlay" class="btn" type="button"
             title="手动挂选中条目(不自动收,点「收件」走 end 段收场)">播件</button>
           <button id="bEmoticonHide" class="btn" type="button"
@@ -209,30 +268,89 @@
       </div>
     </section>
 
-    <details class="group" id="gMotion">
-      <summary>动作库<span class="count" id="famCount"></span><span class="sub">仅动作,无表情/气泡配对</span></summary>
-      <div class="hintline dim">点播供检查,期间自动演出停用;点行名=播全族(S→L),点小方块=只播那一段</div>
-      <div class="filter mt">
-        <input id="famFilter" class="field" type="search" placeholder="筛动作族" aria-label="筛选动作族">
-      </div>
-      <div class="list" id="clips" aria-label="动作族列表"><div class="empty">载入中…</div></div>
-    </details>
-
-    <section class="group">
-      <details id="selfcheckPanel">
-        <summary>诊断自检<span id="selfcheckSummary" class="dim">…</span></summary>
-        <div id="selfcheck"></div>
-        <div class="controls foot">
-          <button id="bCheckMotion" class="btn" type="button"
-            title="播一遍带 S/L 的探针动作族,让「动画推进」「段衔接」两项拿到可测的动作;默认不自动播,所以这两项要点了才有结论">复测动效</button>
+    <!-- 动作页:动作库(仅动作,无表情/气泡配对) -->
+    <section class="pane" data-pane="clips">
+      <div class="sec grow">
+        <header class="sec-head"><h3>动作族</h3><span class="count" id="famCount"></span></header>
+        <div class="hintline dim">点行名=播全族(S→L) · 点小方块=只播那一段;点播期间自动演出停用</div>
+        <div class="filter">
+          <input id="famFilter" class="field" type="search" placeholder="筛动作族" aria-label="筛选动作族">
         </div>
-      </details>
+        <div class="list scroll" id="clips" aria-label="动作族列表"><div class="empty">载入中…</div></div>
+      </div>
     </section>
-  </aside>
 
+    <!-- 诊断页:自检 + 规格 -->
+    <section class="pane" data-pane="diag">
+      <div class="sec">
+        <details id="selfcheckPanel">
+          <summary>诊断自检<span id="selfcheckSummary" class="dim">…</span></summary>
+          <div id="selfcheck"></div>
+          <div class="row-ctl mt">
+            <button id="bCheckMotion" class="btn" type="button"
+              title="播一遍带 S/L 的探针动作族,让「动画推进」「段衔接」两项拿到可测的动作;默认不自动播,所以这两项要点了才有结论">复测动效</button>
+          </div>
+        </details>
+      </div>
+      <div class="sec">
+        <details class="note">
+          <summary>规格</summary>
+          <div class="body">toon 着色 · 眉眼透发(stencil)· 眨眼口型 · 布料实时物理 · S→L→E 段衔接 ·
+            头顶气泡(emoticon)<br>本页是公开数据契约与运行时的示例,不含任何游戏资产。</div>
+        </details>
+      </div>
+      <div class="sec foot dim">
+        <div class="hintline">H 纯净模式 · P 截图 · 空格 播放/暂停 · ←→ 换角色 · ? 帮助</div>
+        <div class="hintline mt">程序代码:仓库许可证 · 游戏内容版权归原权利方(SEGA / Colorful Palette),无隶属,仅研究用途</div>
+      </div>
+    </section>
+  </div>
+</aside>
+
+<!-- 状态条:等宽读数,走浮层但一条贴底;selfcheck 会临时改写 #status 的内容 -->
+<footer id="hud" class="chrome">
+  <div id="status">载入中…</div>
+  <div class="hint">拖拽旋转 · 滚轮缩放</div>
+  <span id="phase" hidden>—</span>
+</footer>
+
+<!-- 纯净模式的召回钮:界面全隐时只剩它 -->
+<button id="uiRecall" type="button" title="恢复界面 (H)" hidden>
+  <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3 1.8 8 5 13M11 3l3.2 5L11 13"/></svg>
+</button>
+
+<!-- 帮助层 -->
+<div id="helpveil" hidden>
+  <div class="help-card" role="dialog" aria-label="帮助与快捷键">
+    <header><h2>chara viewer</h2><button class="tool" id="bHelpClose" type="button" title="关闭 (Esc)">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg>
+    </button></header>
+    <table class="keys">
+      <tbody>
+        <tr><td><kbd>Space</kbd></td><td>播放 / 暂停</td></tr>
+        <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>上一个 / 下一个角色</td></tr>
+        <tr><td><kbd>C</kbd></td><td>轨道 / 自由相机切换</td></tr>
+        <tr><td><kbd>H</kbd></td><td>纯净模式(隐藏全部界面)</td></tr>
+        <tr><td><kbd>P</kbd></td><td>截图,保存为 PNG</td></tr>
+        <tr><td><kbd>?</kbd></td><td>本帮助</td></tr>
+        <tr><td><kbd>Esc</kbd></td><td>关闭帮助 / 退出纯净模式</td></tr>
+      </tbody>
+    </table>
+    <p class="help-note">自由相机下 WASD 移动 · Q/E 或 R/F 升降 · Shift 加速 · Z 减速。<br>
+      拖拽旋转 · 滚轮缩放。数据由 <code>?base=</code> 指向的提取产物目录提供。</p>
+    <p class="help-note legal">程序代码以仓库所附许可证发布。部署实例中出现的角色模型、贴图、音频与名称等游戏内容,
+      版权归其原权利方(SEGA Corporation · Colorful Palette 及各授权方)所有;
+      本项目与上述各方无隶属关系,内容仅用于技术研究。</p>
+  </div>
 </div>
+
+<!-- 轻提示 -->
+<div id="toasts" aria-live="polite"></div>
 
 <script type="importmap">
 { "imports": { "three": "./three.module.min.js" } }
 </script>
 <script type="module" src="./viewer.js"></script>
+<script type="module" src="./shell.js"></script>
+</body>
+</html>
