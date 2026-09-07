@@ -37,6 +37,11 @@ domain uses: without them the package is drawn in its bind pose, and the bind
 pose is not what the prefab is authored at.  Measured over those 111 packages,
 22 carry at least one bone whose authored pose differs from the bind pose, and
 in those the difference reaches 0.34 authored units.
+
+The AnimationClips each package ships are exported as glTF ``animations`` over
+these same node trees (:mod:`fixtures.animations`) -- position / rotation /
+scale curves become channels + samplers targeting the walked nodes, in this
+glb's authored frame, so a furniture performance can play without a sidecar.
 """
 import io
 import json
@@ -54,6 +59,7 @@ from core.jsonio import write_json
 from core.mesh import (FLOAT, UNSIGNED_INT, ARRAY_BUFFER, ELEMENT_ARRAY_BUFFER,
                        TRIANGLES, NOT_TRIANGLES, INDEX_RANGE, compose_mesh,
                        skin_accessors)
+from fixtures.animations import embed
 
 UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
 
@@ -491,11 +497,18 @@ def _materials(tree):
     return list(tree.get("m_Materials") or [])
 
 
-def _walk(glb, record, store, tpid, parent, ctx):
-    """Export one transform and its children, returning the glTF node index."""
+def _walk(glb, record, store, tpid, parent, ctx, prefix=""):
+    """Export one transform and its children, returning the glTF node index.
+
+    *prefix* is the node's full path from its variant root -- the same path
+    space the animation bindings hash, so the walk records every node under
+    ``ctx["table"]["paths"]`` while it builds the tree and this module can
+    resolve a clip's ``crc32(path)`` binding without a second pass.
+    """
     tt = ctx["transforms"][tpid]
     goid = (tt.get("m_GameObject") or {}).get("m_PathID")
     name = str((ctx["gameobjects"].get(goid) or {}).get("m_Name", ""))
+    full = f"{prefix}/{name}" if prefix else name
     translation, rotation, scale = _local_transform(tt)
     node = {"name": name, "translation": translation,
             "rotation": rotation, "scale": scale,
@@ -503,12 +516,18 @@ def _walk(glb, record, store, tpid, parent, ctx):
     index = len(glb.g["nodes"])
     glb.g["nodes"].append(node)
     ctx["nodeIndex"][tpid] = index
+    ctx["table"]["paths"][full] = index
     ctx["report"]["nodeNames"].add(name)
     ctx["variantGoids"].add(goid)
     if goid in ctx["fixtureView"]:
         ctx["fvRoots"].add(ctx["root"])
 
     for cid, kind in _components(record, goid):
+        if kind == "Animator":
+            # An animation binding path is relative to the transform carrying
+            # the Animator; this node becomes one of the variant's anchors.
+            ctx["table"]["animators"].append(full)
+            continue
         if kind not in ("MeshRenderer", "SkinnedMeshRenderer"):
             continue
         skinned = kind == "SkinnedMeshRenderer"
@@ -581,7 +600,8 @@ def _walk(glb, record, store, tpid, parent, ctx):
     for child in tt.get("m_Children") or []:
         child_id = (child or {}).get("m_PathID", 0)
         if child_id in ctx["transforms"]:
-            children.append(_walk(glb, record, store, child_id, index, ctx))
+            children.append(_walk(glb, record, store, child_id, index, ctx,
+                                  prefix=full))
     if children:
         node["children"] = children
     if parent is not None:
@@ -652,7 +672,13 @@ def _bind_skins(glb, ctx):
 
 def _variants(glb, record, store, transforms, gameobjects, roots, ctx,
               container):
-    """Export every root transform tree as one scene variant."""
+    """Export every root transform tree as one scene variant.
+
+    Each variant also leaves behind a path table (``ctx["tables"]``) -- every
+    node's full path to its glTF node index, plus the nodes carrying an
+    Animator -- which :mod:`fixtures.animations` resolves clip bindings
+    against.
+    """
     root_nodes, variants = [], []
     for root in roots:
         root_go = gameobjects.get((transforms[root].get("m_GameObject")
@@ -662,9 +688,11 @@ def _variants(glb, record, store, transforms, gameobjects, roots, ctx,
         ctx["variantGoids"] = set()
         ctx["nodeIndex"] = {}
         ctx["pendingSkins"] = []
+        ctx["table"] = {"paths": {}, "root": root_name, "animators": []}
         before = ctx["report"]["nodeNames"].copy()
         node_index = _walk(glb, record, store, root, None, ctx)
         skins = _bind_skins(glb, ctx)
+        ctx["tables"].append(ctx["table"])
         container_paths = [path for path, goid in container
                            if goid in ctx["variantGoids"]]
         variants.append({
@@ -726,11 +754,12 @@ def _export_package(store, name, out_dir):
     glb = GLB(generator="moly-root fixture extractor")
     report = {"name": name, "nodeNames": set(), "vertexCount": 0,
               "meshCount": 0, "zeroVertexMeshes": 0, "hasGeometry": False,
-              "skinCount": 0, "jointCount": 0, "anomalies": []}
+              "skinCount": 0, "jointCount": 0, "anomalies": [],
+              "animations": []}
     ctx = {"fixtureView": set(), "fvRoots": set(), "root": None,
            "variantGoids": set(), "mesh_cache": {}, "material_cache": {},
            "tex_cache": {}, "skin_cache": {}, "nodeIndex": {},
-           "pendingSkins": [], "report": report}
+           "pendingSkins": [], "tables": [], "table": None, "report": report}
     variants, root_nodes, container = [], [], []
     for record in package.files:
         if not record.kinds:
@@ -759,6 +788,15 @@ def _export_package(store, name, out_dir):
             except ValueError:
                 report["anomalies"].append(
                     {"type": "material-unresolved", "pathId": material_id})
+
+    # The AnimationClips this package ships become glTF animations over the
+    # node trees just written -- embedded, not a sidecar (see
+    # :mod:`fixtures.animations`).  A clip failure must not lose the geometry,
+    # so the embed reports per-clip problems instead of raising; they join the
+    # package's anomaly list so the run summary aggregates them like any other.
+    animations = embed(glb, package, ctx["tables"], report)
+    report["anomalies"].extend(animations["anomalies"])
+    animations["anomalies"] = []
 
     # One scene per variant; the default scene is the one carrying the FixtureView.
     if variants:
@@ -798,6 +836,7 @@ def _export_package(store, name, out_dir):
         "zeroVertexMeshes": report["zeroVertexMeshes"],
         "skinCount": report["skinCount"],
         "jointCount": report["jointCount"],
+        "animations": dict(animations, clips=report["animations"]),
         "hasFixtureView": bool(ctx["fixtureView"]),
         "nodeNames": sorted(report["nodeNames"]),
         "anomalies": report["anomalies"],
@@ -829,6 +868,11 @@ def extract_from_store(store, out_dir):
     mesh_packages = 0
     skins = joints = 0
     skinned_packages = 0
+    animated_packages = 0
+    animation_clips = 0
+    animation_channels = 0
+    animation_float_slots = 0
+    animation_unresolved_slots = 0
     anomalies_by_type = {}
 
     for name in names:
@@ -848,6 +892,13 @@ def extract_from_store(store, out_dir):
         joints += document.get("jointCount", 0)
         if document.get("skinCount", 0):
             skinned_packages += 1
+        animations = document.get("animations") or {}
+        if animations.get("clipCount"):
+            animated_packages += 1
+            animation_clips += animations["clipCount"]
+            animation_channels += animations.get("gltfChannels", 0)
+            animation_float_slots += animations.get("floatSlots", 0)
+            animation_unresolved_slots += animations.get("unresolvedSlots", 0)
         if document["status"] == "exported":
             exported += 1
             mesh_packages += 1
@@ -875,11 +926,16 @@ def extract_from_store(store, out_dir):
         "skins": skins,
         "skinJoints": joints,
         "skinnedPackages": skinned_packages,
+        "animatedPackages": animated_packages,
+        "animationClips": animation_clips,
+        "animationChannels": animation_channels,
+        "animationFloatSlots": animation_float_slots,
+        "animationUnresolvedSlots": animation_unresolved_slots,
         "anomalies": anomalies_by_type,
         "noMeshNames": resolution,
         "failedNames": failures,
     }
-    document = {"version": 1, "summary": summary, "packages": packages}
+    document = {"version": 2, "summary": summary, "packages": packages}
     index_path = write_json(out / "index.json", document)
     return dict(summary, path=str(index_path))
 

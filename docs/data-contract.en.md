@@ -571,6 +571,14 @@ Points that matter:
 - `corpus.json` is the run's account: per family `requested` / `succeeded` / `failed` (denominators and named reasons), cue-level talk-voice coverage, and whether the part-voice packages answer the corpus's `partvoice_` cues. Same rule as `loop.json`: **tool and file names only, never a machine's directory layout**.
 - Waveforms, loop points and the three-state decoder-absent semantics are exactly the phenomena job's (previous section).
 
+## Furniture geometry and embedded animations (`fixture-models/`)
+
+The manifest's whole `mysekai/fixture/` family — **999 packages**, one `.glb` each (`index.json` version 2). The scenes array holds one scene per prefab variant; node TRS and vertex data are written **verbatim in the authored (Unity left-handed) space, with no reflection** — the *opposite* of the character `.glb` convention, and the two families must not share one coordinate-handling code path.
+
+**`animations[]` are embedded** (since 2026-09-08): every AnimationClip a package ships becomes one glTF animation inside the same `.glb`, no sidecar. A binding path is a crc32 hash, resolved **anchored** to the variant carrying the Animator (animator-anchor-relative paths first, hierarchy-root-relative next, whole full-node paths last; first registration wins — when several size variants share relative paths the owner is fixed, never walk order). Channels are Transform TRS only (`translation` / `rotation` / `scale`), targeting nodes that already exist on this glb's node trees, with values in the same verbatim authored space. Interpolation maps from the source curve storage form: StreamedClip cubic polynomials → `CUBICSPLINE` (tangents recovered from the (a,b,c,d) coefficients), DenseClip → `LINEAR`, ConstantClip → `STEP`.
+
+**Accounting** (per curve slot; the classes always sum to the decoded slot count): the `index.json` summary gains `animatedPackages` / `animationClips` / `animationChannels` / `animationFloatSlots` / `animationUnresolvedSlots`; each package's `animations` entry carries `clipCount` / `gltfChannels` / `channeledSlots` / `floatSlots` / `unresolvedSlots` plus a `clips[]` breakdown. Non-Transform bindings (the `m_Float` family: physics, material, blendshape, muscle slots) and unresolved hashes are **counted, not exported** — retargeting is out of scope for this product. Current-content numbers: 137 animated packages, 1727 embedded clips, 11751 channels; 109661 float slots and 18602 unresolved slots counted only (the unresolved mass is `act_*` character-action clips binding character-rig bones, which do not live in a furniture package — a different consumer). The egg family (fixtures 837–840, the `change_fixture_timeline` gate) has been accepted against the decrypted source clip by clip: egg1's 51 clips match on all 2508/2508 channel sample counts.
+
 ## `site/`
 
 The site asset pack. The nine sites share **one** Unity world coordinate system, one

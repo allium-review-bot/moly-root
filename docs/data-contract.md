@@ -569,6 +569,14 @@ layer = min(layers - 1, max(0, floor(fract(clamp(progressSource + progress, 0, 0
 - `corpus.json` 是本次提取的账：逐族 `requested` / `succeeded` / `failed`（分母与具名理由）、talk voice 的 cue 级覆盖、part_voice 包对语料 `partvoice_` cue 的应答情况。与 `loop.json` 同规：**只写工具名与文件名，不写本机目录**。
 - 波形、循环点、解码器缺席的三态语义与现象任务完全一致（见上一节）。
 
+## 家具几何与内嵌动画（`fixture-models/`）
+
+manifest `mysekai/fixture/` 全族 **999 包**，一包一个 `.glb`（`index.json` version 2）。场景数组每 prefab 变体一个场景；节点 TRS、顶点数据按 **authored（Unity 左手）空间逐字导出，不反射**——与角色 `.glb` 的反射约定**相反**，两族文件不得混用同一套坐标处理。
+
+**`animations[]` 内嵌**（2026-09-08 起）：包内每个 AnimationClip 成为一条 glTF animation，无 sidecar。绑定路径是 crc32 hash，解析**锚定**到携带 Animator 的 variant（Animator 锚相对路径优先、层级根相对次之、全路径兜底；先注册者赢——多尺寸变体共享相对路径时归属固定，不随遍历序漂移）。通道只有 Transform TRS（`translation` / `rotation` / `scale`），目标就是本 glb 节点树上既有的节点，值同样 verbatim authored 空间。插值按源曲线存储形式映射：StreamedClip 三次多项式 → `CUBICSPLINE`（切线由 (a,b,c,d) 系数恢复）、DenseClip → `LINEAR`、ConstantClip → `STEP`。
+
+**账目**（槽位级，类和恒等于解码槽总数）：`index.json` summary 增 `animatedPackages` / `animationClips` / `animationChannels` / `animationFloatSlots` / `animationUnresolvedSlots`；每包 `animations` 节含 `clipCount` / `gltfChannels` / `channeledSlots` / `floatSlots` / `unresolvedSlots` 与 `clips[]` 明细。非 Transform 绑定（m_Float 一族：物理/材质/blendshape/肌肉）与未解析 hash **只盘点不导**——retarget 不在本产品范围。当前内容报数：137 包带动画、1727 clips 内嵌、11751 通道；float 槽 109661、未解析槽 18602（绝大多数是 `act_*` 角色动作绑角色骨架——角色骨架不在家具包里，属另一消费面）。egg 家族（fixture 837–840，`change_fixture_timeline` 的门）已按逐 clip 通道数/采样数与解密包反序列化值对照验收：egg1 51 clips 2508/2508 通道逐项相等。
+
 ## `site/`
 
 站点资产包。九个站点共用**一个 Unity 世界坐标系**，一站一个偏移；八个场景包之外，同一路径下还有室内套件、房间皮肤、场地物件、移动大炮与世界地图，共 **109** 个包，一个都不落在契约外。
