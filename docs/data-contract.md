@@ -550,6 +550,25 @@ layer = min(layers - 1, max(0, floor(fract(clamp(progressSource + progress, 0, 0
 
 现象的颜色分级是**参数式的**（`ColorAdjustments` / `SplitToning` / `WhiteBalance`），**不走查表贴图**。这条是查过的，不是没看：29 份后处理档案里没有任何查表组件（组件集合只有 `MysekaiFogVolume`、`MysekaiFlareParaVolume`、`MysekaiParticleBloomVolume`、`MysekaiDiffusionVolume`、`ColorAdjustments`，另有个别现象上的 `Bloom` / `SplitToning` / `WhiteBalance`），29 份档案里唯一的贴图型参数是 `dirtTexture`，而它**全部为空指针**；这些包所在的整个语料里也**没有任何 3D 贴图**。`summary.missing.lut` 恒有一条说明这件事——**缺席必须被写出来，否则消费方分不清「没有」与「漏了」**。
 
+## 全量音频（`mysekai-audio` 命令）
+
+现象任务只提取 master 行点名的音频：站点/现象音乐与共享环境音包。其余音频由 `mysekai-audio` 一次提上盘，**并写进同一个 `phenomena/audio/` 库**，目录形状与现象任务一致（`audio/<档名>/<档名>.acb` 加解码出的 `<cue>.wav|.ogg`），循环点照旧并入 `audio/loop.json`。四族四个分母：
+
+| 族 | 分母 | 口径 |
+|---|---|---|
+| talk voice | `talks.json` 的 `voice_` cue | **按 cue 点名，不按包盲提**。cue → 去掉 `voice_` 前缀、再去掉结尾的行/变体一对 → 该对话脚本自己的包 `mysekai/talk/voice/<脚本名>`；只解码语料点名的 cue，一包之内语料没用到的 cue 留着不解。 |
+| se（家具音效） | manifest 的 `mysekai/sound/se/` 全族，减去已在盘的共享环境音包 | 整包全解。 |
+| bgm 余量 | manifest 的 `mysekai/sound/bgm/` 全族，减去已在盘 | 整包全解：jukebox 曲库（music0001–16）、教程曲与站点曲变体——现象任务的 master 行不点名这些。 |
+| part_voice | manifest 的 `mysekai/talk/part_voice/` 全族 | 整包全解。piapro 型角色专属；装载按 UnitType 门控，人类角色没有包是真源构造，不是缺口。 |
+
+要点：
+
+- **`loop.json` 是合并文档**：现象任务写的条目原样保留，本命令的条目追加（同包名则以新替旧）。`index.json` 的 `audio` 字段仍是现象任务自己那一片——**要全量音频读 `loop.json`，不要读 `index.json`**。
+- **语料点不到的包不提**：talk voice 家族在 manifest 里有 3995 包，`talks.json` 只点名其中一部分；fixture-talks 语料的 voice cue 是另一个消费面，不在本命令的分母里。
+- **cue 在包里没有对应波形、或脚本名根本没有包**，都逐条具名写进 `audio/corpus.json`（`families.talk-voice.uncovered` 与 `missingPackages`）——这是上游数据缺口，不是提取失败，命令照常完成。
+- `corpus.json` 是本次提取的账：逐族 `requested` / `succeeded` / `failed`（分母与具名理由）、talk voice 的 cue 级覆盖、part_voice 包对语料 `partvoice_` cue 的应答情况。与 `loop.json` 同规：**只写工具名与文件名，不写本机目录**。
+- 波形、循环点、解码器缺席的三态语义与现象任务完全一致（见上一节）。
+
 ## `site/`
 
 站点资产包。九个站点共用**一个 Unity 世界坐标系**，一站一个偏移；八个场景包之外，同一路径下还有室内套件、房间皮肤、场地物件、移动大炮与世界地图，共 **109** 个包，一个都不落在契约外。

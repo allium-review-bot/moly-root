@@ -552,6 +552,25 @@ Each `omitted` entry carries `{phenomenon, effect, node, component, reason}`, pl
 
 Colour grading here is **parametric** (`ColorAdjustments`, `SplitToning`, `WhiteBalance`) and does **not** go through a lookup texture. This was checked rather than assumed: none of the 29 profiles carries a lookup component (the component set is `MysekaiFogVolume`, `MysekaiFlareParaVolume`, `MysekaiParticleBloomVolume`, `MysekaiDiffusionVolume`, `ColorAdjustments`, plus `Bloom` / `SplitToning` / `WhiteBalance` on individual phenomena), the only texture-typed parameter across all 29 is `dirtTexture` and **every one of them is a null pointer**, and the whole corpus these packages come from holds **no 3D texture at all**. `summary.missing.lut` always says so — **an absence has to be written down, or a consumer cannot tell "not there" from "left out"**.
 
+## The full sound corpus (the `mysekai-audio` command)
+
+The phenomena job extracts only the audio master rows point at: site/phenomenon music and one shared ambience package. `mysekai-audio` extracts the rest in one run and writes it **into the same `phenomena/audio/` library**, in the same per-package shape (`audio/<archive>/<archive>.acb` plus the decoded `<cue>.wav|.ogg`), with loop points merged into `audio/loop.json` as before. Four families, four denominators:
+
+| Family | Denominator | Reading |
+|---|---|---|
+| talk voices | the `voice_` cues of `talks.json` | **Named by cue, never extracted by package.** A cue minus its `voice_` prefix minus the trailing line/variant pair names the talk script, and the script names its own package `mysekai/talk/voice/<script>`; only the cues the corpus names are decoded — other cues inside the same archive stay undecoded on purpose. |
+| se (fixture effects) | the manifest's whole `mysekai/sound/se/` family, minus the shared ambience package already on disk | Whole archive. |
+| remaining bgm | the manifest's whole `mysekai/sound/bgm/` family, minus what is already on disk | Whole archive: the jukebox library (music0001–16), the tutorial songs and site-music variants — no master row of the phenomena job names these. |
+| part voices | the manifest's whole `mysekai/talk/part_voice/` family | Whole archive. These belong to piapro-type characters; loading is gated on UnitType, so a human character having no package is the truth of the construction, not a gap. |
+
+Points that matter:
+
+- **`loop.json` is a merged document**: the phenomena job's entries stay exactly where they are, this command's are appended (a package name present in both is replaced by the new entry). The `audio` field of `index.json` remains the phenomena job's own slice — **for the full sound corpus read `loop.json`, not `index.json`**.
+- **Packages no corpus names are not extracted**: the manifest lists 3995 talk-voice packages and `talks.json` names only part of them; the fixture-talks corpus's voice cues are a separate consumer and outside this command's denominator.
+- **A cue no waveform answers, or a script name with no package at all**, is reported by name in `audio/corpus.json` (`families.talk-voice.uncovered` and `missingPackages`) — an upstream data gap, not an extraction failure; the command completes regardless.
+- `corpus.json` is the run's account: per family `requested` / `succeeded` / `failed` (denominators and named reasons), cue-level talk-voice coverage, and whether the part-voice packages answer the corpus's `partvoice_` cues. Same rule as `loop.json`: **tool and file names only, never a machine's directory layout**.
+- Waveforms, loop points and the three-state decoder-absent semantics are exactly the phenomena job's (previous section).
+
 ## `site/`
 
 The site asset pack. The nine sites share **one** Unity world coordinate system, one

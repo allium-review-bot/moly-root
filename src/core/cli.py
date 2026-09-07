@@ -191,6 +191,24 @@ def main(argv=None):
                                       "entry says what is missing")
     w.add_argument("--ffmpeg", help="path to ffmpeg, used only to write a compressed "
                                     "copy of each decoded sound")
+    a = sub.add_parser("mysekai-audio",
+                       help="extract the rest of the sound corpus: talk voices "
+                            "named by talks.json, plus the remaining se, bgm "
+                            "and part-voice packages")
+    a.add_argument("--talks", required=True,
+                   help="talks.json, whose voice cues are the talk-voice "
+                        "denominator; only those cues are decoded")
+    a.add_argument("--manifest", required=True,
+                   help="asset bundle manifest giving the family denominators")
+    a.add_argument("--bundle-root", required=True,
+                   help="directory holding the decrypted sound packages")
+    a.add_argument("--out-dir", required=True,
+                   help="the phenomena output directory whose audio/ receives "
+                        "the products and whose loop.json is merged into")
+    a.add_argument("--vgmstream", help="path to the external audio decoder "
+                                       "(vgmstream-cli), or the directory holding it")
+    a.add_argument("--ffmpeg", help="path to ffmpeg, used only to write a compressed "
+                                    "copy of each decoded sound")
     q = sub.add_parser("site", help="extract the site (place) asset packages")
     q.add_argument("--bundle", action="append", required=True,
                    help="a package under the site path; repeat for as many as wanted")
@@ -379,6 +397,15 @@ def main(argv=None):
                                    extra_archives=builtin_archive_paths(
                                        args.builtin_resources))
         print(json.dumps({k: v for k, v in report.items() if k != "perBundle"},
+                         ensure_ascii=False))
+        return 0
+    if args.cmd == "mysekai-audio":
+        from phenomena.audio_corpus import extract_audio_corpus
+        report = extract_audio_corpus(args.talks, args.manifest,
+                                      args.bundle_root, args.out_dir,
+                                      decoder=args.vgmstream,
+                                      transcoder=args.ffmpeg)
+        print(json.dumps({k: v for k, v in report.items() if k != "audio"},
                          ensure_ascii=False))
         return 0
     if args.cmd == "site":

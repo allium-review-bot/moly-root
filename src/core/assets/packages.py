@@ -195,6 +195,17 @@ class PackageStore:
         self._packages[name] = package
         return package
 
+    def forget(self, name):
+        """Drop a loaded package from the cache.
+
+        A one-shot reader walking a large corpus (every talk voice package,
+        say) consumes each package exactly once; releasing it as it goes keeps
+        the run's memory to one package instead of the whole corpus.  Only
+        packages already loaded are affected, so this never undoes a lookup
+        that has not happened.
+        """
+        self._packages.pop(str(name), None)
+
     def follow(self, record, pointer):
         """Resolve a pointer to ``(file, path id)``, or ``None`` when it is not here."""
         pointer = pointer or {}
