@@ -23,6 +23,7 @@ from pathlib import Path
 from core.assets.packages import PackageStore
 from core.jsonio import write_json
 from . import census
+from . import harvest
 from .placement import (MASTER_TABLES, NO_MASTER, SEMANTICS as PLACEMENT_SEMANTICS,
                         constants_document, placement_document)
 from .scenes import PackageExtract
@@ -196,6 +197,7 @@ def extract_sites(bundles, out_dir, bundle_root=None, master=None, master_cache=
     index = {"version": 1, "semantics": SEMANTICS, "constants": constants_document(),
              "placement": {"file": "sites.json"},
              "packages": {"file": "packages.json", "count": len(names), "byKind": {}},
+             "harvest": {"file": "harvest.json"},
              "scenes": {}, "indoor": None, "families": {},
              "timelineSockets": []}
     totals = {name: 0 for name in COUNTERS}
@@ -284,6 +286,16 @@ def extract_sites(bundles, out_dir, bundle_root=None, master=None, master_cache=
              "geometry": None if not geometry else f"{prefix}/{geometry['file']}"})
 
     index["indoor"] = indoor_document(documents)
+
+    # The field/object family is one job's worth of packages inside the site
+    # pack, but a consumer of harvest objects wants it as one index: which
+    # packages exist, what each one's status and geometry and view contract
+    # are, and which master rows name it.  That join is written here from the
+    # documents this same loop produced -- re-reading the bundles would pay
+    # the load cost twice for the same objects.
+    harvest_index = harvest.harvest_document(documents, master=master,
+                                              master_cache=master_cache)
+    write_json(out / "harvest.json", harvest_index)
 
     master_rows, absent = {}, []
     if master:

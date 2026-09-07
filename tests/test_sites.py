@@ -13,6 +13,7 @@ import os
 import re
 import struct
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -921,3 +922,189 @@ def test_a_missing_dependency_is_named_rather_than_silently_unresolved(
                           .read_text(encoding="utf-8"))
     shader = document["materials"][0]["shader"]
     assert shader["name"] is None and shader["external"] is True
+
+
+# -- the harvest-object family -----------------------------------------------
+#
+# The field/object packages are the objects a harvest site spawns at runtime.
+# The site pack extracts them like any other prop; the harvest index is the
+# joined view of that extraction -- status, geometry, the view contract, and
+# the master rows that name each package.
+
+HARVEST_STONE = "mysekai__site__field__object__mdl_site_rock_common_stone01"
+HARVEST_LOG = "mysekai__site__field__object__mdl_site_wood_common_logdrop01"
+HARVEST_FX = "mysekai__site__field__object__mdl_site_rock_common_stone01_fx"
+
+MASTER_HARVEST_FIXTURES = [
+    {"id": 111, "mysekaiSiteHarvestFixtureType": "mineral", "hp": 3,
+     "lastAttackStamina": 20, "mysekaiSiteHarvestFixtureRarityType": "rarity_1",
+     "assetbundleName": "mdl_site_rock_common_stone01"},
+    # names a package this corpus does not hold: the other direction of the join
+    {"id": 222, "mysekaiSiteHarvestFixtureType": "wood", "hp": 5,
+     "lastAttackStamina": 25, "mysekaiSiteHarvestFixtureRarityType": None,
+     "assetbundleName": "mdl_site_unheard_of_tree"},
+]
+MASTER_MATERIALS_ROWS = [
+    {"id": 1, "mysekaiMaterialType": "wood", "mysekaiMaterialRarityType": "rarity_1",
+     "modelAssetbundleName": "mdl_site_wood_common_logdrop01"},
+]
+
+
+def _harvest_package(leaf, view=True, geometry=True):
+    """One field/object package: a mesh + view behaviour, or less of either."""
+    package = _Package(f"mysekai__site__field__object__{leaf}", ["mysekai/shader"],
+                       externals=[f"CAB-{SHADER_PACKAGE}"])
+    components = []
+    if geometry:
+        texture = package.texture(f"tex_{leaf}")
+        material = package.material(f"mat_{leaf}", texture,
+                                    shader={"m_FileID": 1, "m_PathID": 7001})
+        mesh = package.mesh(f"{leaf}_mesh")
+        components += [_filter(mesh), _renderer(material)]
+    if view:
+        components.append(("MonoBehaviour", {
+            "m_Enabled": 1, "m_Script": {"m_FileID": 0, "m_PathID": 9101},
+            "m_Name": "", "radius": 1.5,
+            "mysekaiSiteHarvestFixtureType": 1, "isRareObject": 0,
+            "collisionType": 1}))
+        package.add("MonoScript", {"m_ClassName": "MysekaiAreaStoneView"},
+                    path_id=9101)
+    package.node(leaf, components=components,
+                 asset=f"assets/.../mysekai/site/field/object/{leaf}/{leaf}.prefab")
+    return package.finish()
+
+
+def _harvest_master(tmp_path):
+    directory = tmp_path / "master"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "mysekaiSiteHarvestFixtures.json").write_text(
+        json.dumps(MASTER_HARVEST_FIXTURES), encoding="utf-8")
+    (directory / "mysekaiMaterials.json").write_text(
+        json.dumps(MASTER_MATERIALS_ROWS), encoding="utf-8")
+    return str(directory)
+
+
+@pytest.fixture
+def harvest_extracted(tmp_path, monkeypatch):
+    packages = _corpus()
+    packages[HARVEST_STONE] = _harvest_package("mdl_site_rock_common_stone01")
+    packages[HARVEST_LOG] = _harvest_package("mdl_site_wood_common_logdrop01",
+                                             view=False)
+    packages[HARVEST_FX] = _harvest_package("mdl_site_rock_common_stone01_fx",
+                                            view=False, geometry=False)
+    monkeypatch.setattr(core_mesh, "MeshHandler", _StubMeshHandler)
+    monkeypatch.setattr(packages_module.UnityPy, "load",
+                        lambda path: packages[os.path.basename(str(path))])
+    out = tmp_path / "out" / "site"
+    master = _master(tmp_path)
+    for name, rows in (("mysekaiSiteHarvestFixtures", MASTER_HARVEST_FIXTURES),
+                       ("mysekaiMaterials", MASTER_MATERIALS_ROWS)):
+        (Path(master) / f"{name}.json").write_text(json.dumps(rows),
+                                                   encoding="utf-8")
+    report = pack.extract_sites(
+        [str(tmp_path / "bundles" / name) for name in packages],
+        str(out), bundle_root=str(tmp_path / "bundles"), master=master)
+    harvest = json.loads((out / "harvest.json").read_text(encoding="utf-8"))
+    return report, out, harvest
+
+
+def test_the_index_names_the_harvest_family_document(extracted):
+    """Red when the family's document is dropped from the index: a consumer
+    reading the contract would not know where the joined view lives."""
+    _, _, index, _ = extracted
+    assert index["harvest"]["file"] == "harvest.json"
+
+
+def test_the_harvest_summary_counts_the_family_with_the_shared_vocabulary(
+        harvest_extracted):
+    """Red when a package is dropped, or when the status vocabulary drifts from
+    the furniture-geometry index's: bundles/exported/noMesh/failed are the four
+    numbers a consumer compares across both model families."""
+    _, _, harvest = harvest_extracted
+    summary = harvest["summary"]
+    assert summary["bundles"] == 3
+    assert summary["exported"] == 2
+    assert summary["noMesh"] == 1
+    assert summary["failed"] == 0
+    assert summary["noMeshNames"] == [HARVEST_FX]
+    # the no-mesh package says *why*: open but geometry-less, not absent
+    assert harvest["packages"][HARVEST_FX]["reason"]
+
+
+def test_the_view_contract_is_copied_verbatim(harvest_extracted):
+    """Red when the prefab's own declaration of what it is (radius, fixture
+    type, collision layer, rare flag) is dropped or translated: the four
+    fields are the game's serialized contract, not a summary of it."""
+    _, _, harvest = harvest_extracted
+    view = harvest["packages"][HARVEST_STONE]["view"]
+    assert len(view) == 1
+    assert view[0] == {"class": "MysekaiAreaStoneView", "radius": 1.5,
+                       "mysekaiSiteHarvestFixtureType": 1,
+                       "collisionType": 1, "isRareObject": 0}
+    # a package with no view behaviour says so rather than being guessed at
+    assert harvest["packages"][HARVEST_LOG]["view"] is None
+    assert "companion" in harvest["packages"][HARVEST_LOG]["viewReason"]
+
+
+def test_the_fixture_rows_join_onto_packages_in_both_directions(
+        harvest_extracted):
+    """Red when either direction of the join is folded away: a row naming an
+    unextracted package (master/disk disagreement) and a package no row names
+    (companion) are different facts with different fixes."""
+    _, _, harvest = harvest_extracted
+    summary = harvest["summary"]
+    assert summary["masterRows"] == 2
+    assert summary["masterRowsMatched"] == 1
+    assert summary["masterRowsUnmatched"] == ["mdl_site_unheard_of_tree"]
+    # the dropped model of a drop item is a second, separate join
+    assert summary["materialRows"] == 1
+    assert summary["materialRowsMatched"] == 1
+    assert summary["packagesWithoutMasterRow"] == [HARVEST_FX]
+    stone = harvest["packages"][HARVEST_STONE]["masterRows"]
+    assert [row["id"] for row in stone] == [111]
+    log = harvest["packages"][HARVEST_LOG]["materialRows"]
+    assert [row["id"] for row in log] == [1]
+
+
+def test_without_master_the_harvest_index_reports_the_missing_join(
+        tmp_path, monkeypatch):
+    """Red when a missing master directory invents rows or drops the index: the
+    packages are still counted from the extraction alone, and the join is
+    reported as missing with its reason."""
+    packages = _corpus()
+    packages[HARVEST_STONE] = _harvest_package("mdl_site_rock_common_stone01")
+    monkeypatch.setattr(core_mesh, "MeshHandler", _StubMeshHandler)
+    monkeypatch.setattr(packages_module.UnityPy, "load",
+                        lambda path: packages[os.path.basename(str(path))])
+    out = tmp_path / "out" / "site"
+    pack.extract_sites([str(tmp_path / "bundles" / name) for name in packages],
+                       str(out), bundle_root=str(tmp_path / "bundles"))
+    harvest = json.loads((out / "harvest.json").read_text(encoding="utf-8"))
+    assert harvest["summary"]["bundles"] == 1
+    assert harvest["summary"]["exported"] == 1
+    assert harvest["master"]["missing"] and "master" in harvest["master"]["missing"]
+    assert harvest["packages"][HARVEST_STONE]["masterRows"] is None
+
+
+def test_the_status_rule_rejects_a_zero_vertex_export():
+    """Red when a zero-vertex geometry reads as exported: an empty file passes
+    every check that only lists names, so the status rule has to count."""
+    from sites import harvest as harvest_module
+    document = {"kind": "prop", "key": "field__object__x",
+                "package": "mysekai__site__field__object__x", "file": "props/x/x.json",
+                "geometry": {"file": "x.glb", "meshes": 1, "vertices": 0},
+                "roots": [], "components": {}, "materials": []}
+    status, reason = harvest_module._status(document)
+    assert status == "no-mesh" and reason
+
+
+def test_a_package_that_could_not_open_is_failed_not_no_mesh():
+    """Red when an unopenable package reads as geometry-less: the two facts call
+    for different fixes, and the furniture index keeps them apart the same way."""
+    from sites import harvest as harvest_module
+    document = {"kind": "prop", "key": "field__object__x",
+                "package": "mysekai__site__field__object__x",
+                "unsupported": [{"reason": "OSError: cannot open"}]}
+    status, reason = harvest_module._status(document)
+    assert status == "failed" and "cannot open" in reason
+

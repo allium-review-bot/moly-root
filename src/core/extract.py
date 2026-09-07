@@ -223,6 +223,7 @@ FIXED_ARTIFACT_PATHS = (
     "avatar-parts/avatar-parts.json",
     "phenomena/index.json",
     "site/index.json",
+    "site/harvest.json",
     "fixture-interface/attach-points.json",
     "fixture-interface/areas.json",
     "fixture-models/",
@@ -237,6 +238,9 @@ FIXED_ARTIFACT_PATHS = (
     "camera/",
     "perf-animations/",
     "ui/talk.json",
+    "ui/atlas.json",
+    "ui/atlas/textures/",
+    "ui/atlas/sprites/",
 )
 
 
@@ -414,6 +418,35 @@ def _ui_artifact(out, player_data):
                            "rootClasses": list(UI_WINDOW_ROOT_CLASSES),
                            "windows": windows, "summary": counts})
         entry.update(status="succeeded", error="", counts=counts, path=str(path))
+    except Exception as exc:
+        entry.update(status="failed", error=f"{type(exc).__name__}: {exc}")
+    return entry
+
+
+def _ui_atlas_artifact(out, player_data):
+    """Build ``ui/atlas.json`` and the atlas images from the player-data file.
+
+    Like the dialogue-UI artifact, the sprite atlases live in the APK's player
+    data and in no downloadable package, so the input path has to come from the
+    caller and without it the artifact is ``skipped`` *with the reason* rather
+    than left out.  The atlas texture images are large, so only the atlases the
+    order names are decoded; every atlas is inventoried regardless, and the
+    counts carry how many sprite rectangles matched their authored sizes.
+    """
+    entry = {"artifact": "ui/atlas.json", "domain": "ui", "status": "skipped",
+             "counts": {},
+             "error": "no player-data file supplied; the UI sprite atlases are "
+                      "built into the APK player data, which is not a "
+                      "downloadable package and cannot be routed by bundle name"}
+    if not player_data:
+        return entry
+    try:
+        import ui.atlas as atlas
+        if not Path(player_data).exists():
+            raise FileNotFoundError(f"player data not found: {player_data}")
+        summary = atlas.extract_atlas(str(player_data), out / "ui" / "atlas")
+        entry.update(status="succeeded", error="", counts=summary,
+                     path=str(out / "ui" / "atlas" / "atlas.json"))
     except Exception as exc:
         entry.update(status="failed", error=f"{type(exc).__name__}: {exc}")
     return entry
@@ -1245,7 +1278,8 @@ def extract_manifest(manifest, bundles, out, unity_version=None, master=None,
     # caller hands in -- so it is reported under its own key rather than among
     # the artifacts derived from the extracted packages.  It is always present:
     # skipped-with-a-reason when no path was supplied, never absent.
-    report["playerData"] = [_ui_artifact(out, player_data)]
+    report["playerData"] = [_ui_artifact(out, player_data),
+                            _ui_atlas_artifact(out, player_data)]
     pack_manifest = write_pack_manifest(out)
     report["derived"].append({
         "artifact": "manifest.json",

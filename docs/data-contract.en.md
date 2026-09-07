@@ -577,6 +577,8 @@ site/
                                 + levels and grid extents + the footstep table
   packages.json                 the census of all 109: class, inventory, per-object
                                 accounting, artifact counts
+  harvest.json                  the field-object family as one joined view: status,
+                                geometry, view contract, and master joins per package
   scenes/<site>/
     <site>.json                 everything in the package: slots, collision,
                                 navigation, materials, components, environment presets
@@ -784,6 +786,50 @@ Measured: the delivery site declares 12 inside its bundle where the manifest dec
 is 1 against 5 and `grasslands` 1 against 4. Work out what a download must fetch from the
 manifest; `declaredDependencies` answers only "what does this package point at", and
 the `dependencySource` field says so inside the artifact.
+
+### Harvest objects: 61 packages, one joined index
+
+The harvest objects (trees, stones, plants, treasure boxes, drop items) are
+entities a harvest site spawns at runtime, not geometry baked into a scene. They
+live under the `field/object` path, and the site pack extracts every one of them
+the ordinary way — the census classes them as `props/` and the geometry and
+materials land in each package's directory. `harvest.json` is that family as one
+joined view: it re-reads no bundle, it joins the 61 package documents the same
+run produced into the one table a consumer of this family wants.
+
+One entry per package, with a **three-way status** (`exported` / `no-mesh` /
+`failed` — the same vocabulary the furniture-geometry index uses, so both model
+families are read with one rule), the glb path (relative to this file), mesh and
+vertex counts, shader family names, animation clip names, particle emitter
+counts, and the **view contract**: the behaviour in the package whose serialized
+fields carry `mysekaiSiteHarvestFixtureType` is the object's view, and its
+`radius` / `mysekaiSiteHarvestFixtureType` / `collisionType` / `isRareObject`
+are copied **verbatim**. Detection is by data, not by a class list — routing on
+the field picks up a class this extractor has never seen, where a class-name list
+would drop it into a default bucket. **A package without the field is a model or
+effect companion, not a harvestable object**: measured, 37 of the 61 carry a
+view and 24 do not, and the latter carry a `viewReason` instead of a guess.
+
+Two master joins, **both directions reported**. Rows of
+`mysekaiSiteHarvestFixtures` name a package by the leaf of its path
+(`assetbundleName`): in this snapshot all 42 rows match packages on disk (36
+distinct leaves — rarity rows share one name). Rows of `mysekaiMaterials` name
+the model of a *dropped* item (`modelAssetbundleName`) — a different population,
+a log bundle is not a harvestable tree: of 62 rows, 36 carry a model name and
+all 36 match. Nine packages are named by neither table (birthday companions,
+blueprint and record drops, the paper airplane): five of them are declared as
+dependencies by a sibling package and four stand alone; they are listed under
+`packagesWithoutMasterRow`, not folded into an "unmatched" count with the
+opposite direction — a row naming a package this run did not extract, which in
+this snapshot is zero in both directions, is a master/disk disagreement and a
+different fact. The remaining three family tables carry no bundle names and are
+reported by presence and row count only, never by a join they cannot answer.
+Without a master directory the geometry and view contracts are still written and
+both joins are reported as missing with the reason — the same rule the placement
+table follows.
+
+Measured: all 61 packages `exported` (123 prefab roots, 0 no-mesh, 0 failed), 22
+decoded animation clips in the family.
 
 ### Every package was opened, and every object is accounted for
 
