@@ -157,7 +157,8 @@ class Textures:
         """
         reference = {"name": name, "kind": "Texture2DArray",
                      "width": tree.get("m_Width"), "height": tree.get("m_Height"),
-                     "layers": tree.get("m_Depth"), "file": None, "files": []}
+                     "layers": tree.get("m_Depth"), "file": None, "files": [],
+                     "colorSpace": tree.get("m_ColorSpace")}
         try:
             self.directory.mkdir(parents=True, exist_ok=True)
             layers = list(record.objects[path_id].read().images)
@@ -194,8 +195,13 @@ class Textures:
                                 "reason": f"{kind} is not a single image"})
             self.written[key] = {"name": name, "kind": kind, "file": None}
             return dict(self.written[key])
+        # m_ColorSpace is the authored colour-space flag (0 = Linear,
+        # 1 = sRGB).  A PNG carries no colour-space metadata, so this is the
+        # only place the authored value survives extraction; consumers load
+        # by this field instead of guessing (0/1 is the whole range).
         reference = {"name": name, "kind": kind, "file": f"{self.prefix}/{stem}.png",
-                     "width": tree.get("m_Width"), "height": tree.get("m_Height")}
+                     "width": tree.get("m_Width"), "height": tree.get("m_Height"),
+                     "colorSpace": tree.get("m_ColorSpace")}
         try:
             self.directory.mkdir(parents=True, exist_ok=True)
             record.objects[path_id].read().image.save(self.directory / f"{stem}.png")

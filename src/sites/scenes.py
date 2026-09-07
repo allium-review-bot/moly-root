@@ -724,6 +724,18 @@ class PackageExtract:
                                 if reference.get("file")]
                                + [path for reference in self.textures.written.values()
                                   for path in reference.get("files") or []]),
+            # The authored colour space of every exported image (True = sRGB,
+            # from the texture's m_ColorSpace).  A PNG carries no colour-space
+            # metadata, so this map is the only place the authored value
+            # survives; consumers load each image by it instead of guessing.
+            # Array layers share their texture's space.
+            "textureColourSpace": {
+                path: reference.get("colorSpace") == 1
+                for reference in self.textures.written.values()
+                for path in ([reference["file"]]
+                             if reference.get("file")
+                             else reference.get("files") or [])
+            },
             "components": {name: entry for name, entry
                            in sorted(self.components.items())},
             "particles": self.particles,
