@@ -22,3 +22,4 @@ blueprint/
 
 # CodeGraph 索引（本机重建）
 .codegraph/
+.stash-untracked/
