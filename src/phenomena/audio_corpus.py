@@ -19,10 +19,13 @@ failure, and naming it beats papering over it.
 
 The other three families are extracted whole.  Furniture effects (``se``), the
 music packages the master rows do not name (jukebox tracks, tutorial songs,
-variants), and the part-voice packages — which the game gates to one character
-kind at load time, so a missing package for the other kind is the truth of the
+variants), and the part-voice packages — both sides of what a gate-passing
+speaker loads, the mysekai side and the scenario side, gated to one character
+kind at load time so a missing package for the other kind is the truth of the
 construction, not an extraction gap — all answer to "everything in the family",
-not to a cue list.
+not to a cue list.  A package the manifest marks as part of the player build
+is not on the download path at all: asking for it still counts, but the
+failure names that instead of "not in the decrypted tree".
 
 Output lands in the same ``audio/`` library the phenomena job writes, in the
 same per-package shape, and the loop sidecar is merged: packages already on
@@ -43,7 +46,12 @@ from .audio import DECODER, Library, TRANSCODER, archive_bytes
 # Package families, in manifest form (slash-separated) and store form (the
 # flattened names the decrypted tree uses).
 TALK_VOICE = "mysekai/talk/voice/"
-PART_VOICE = "mysekai/talk/part_voice/"
+# The part-voice family is both sides of a gate-passing speaker's load: the
+# mysekai packages under mysekai/talk/part_voice/, and the scenario-side ones
+# under sound/scenario/voice/part_voice_*.  An older scenario path
+# (sound/scenario/part_voice/) also exists in the manifest, but the talk
+# chain never names it, so it is not part of this family.
+PART_VOICE = ("mysekai/talk/part_voice/", "sound/scenario/voice/part_voice_")
 SE = "mysekai/sound/se/"
 BGM = "mysekai/sound/bgm/"
 
@@ -53,6 +61,8 @@ CUE_PREFIX = "voice_"
 
 NO_PACKAGE = "no package for this cue's talk script in the manifest"
 NO_BUNDLE = "package is not in the decrypted tree"
+BUILT_IN = ("the manifest marks this package as part of the player build: it "
+            "is not on the download path")
 NO_ARCHIVE = "package holds no audio archive"
 
 # A run walks a thousand-plus packages; the loop sidecar is rewritten every
@@ -70,10 +80,11 @@ SEMANTICS = {
     "uncovered": ("cues whose talk script has no package in the manifest: a "
                   "data gap to fix upstream, named rather than swallowed"),
     "partVoiceCues": ("the talk corpus also names part-voice cues; this is "
-                      "whether the part-voice packages on disk answer them, "
-                      "as a check only — the packages themselves are "
-                      "extracted whole, and the unanswered names accumulate "
-                      "across runs"),
+                      "whether the part-voice packages on disk — both sides "
+                      "of the family — answer them, as a check only: the "
+                      "packages themselves are extracted whole, the "
+                      "unanswered names accumulate across runs, and a "
+                      "package on disk is the only thing that clears one"),
     "loop": ("the loop sidecar is shared with the phenomena job: existing "
              "entries keep their places, this job's are appended"),
     "corpus": ("the corpus ledger accumulates across runs the way the loop "
@@ -81,8 +92,9 @@ SEMANTICS = {
                "previous summary, a family it did ask for adds this run's "
                "counts to the previous ones and merges its named entries by "
                "name with this run's reading winning, and the part-voice "
-               "check keeps every unanswered name any run has found — the "
-               "ledger describes the corpus on disk, not the last run"),
+               "check keeps every unanswered name any run has found until a "
+               "package on disk answers it — the ledger describes the corpus "
+               "on disk, not the last run"),
     "inPackage": ("counts taken from the archives' own reports; a stream "
                   "without a `wav` path failed to decode and says why"),
 }
@@ -139,11 +151,12 @@ def _existing_packages(audio_root):
             if entry.get("package")]
 
 
-def _extract_one(store, library, flat, cues, failures):
+def _extract_one(store, library, flat, cues, failures,
+                 absent_reason=NO_BUNDLE):
     """One package into the library; ``False`` when nothing could be read."""
     package = store.package(flat, record_missing=False)
     if package is None:
-        failures.append({"package": flat, "reason": NO_BUNDLE})
+        failures.append({"package": flat, "reason": absent_reason})
         return False
     for asset_name, record, path_id in package.contents:
         if record.kinds.get(path_id) != "TextAsset":
@@ -221,24 +234,31 @@ def _merge_family(prior, current):
     return merged
 
 
-def _merge_part_voice(prior, current):
+def _merge_part_voice(prior, current, answered_on_disk):
     """The part-voice check as an accumulating account: the counts describe
-    the latest corpus, the unanswered names accumulate across runs."""
+    the latest corpus, a name stays on the books from the run that found it
+    unanswered, and a package on disk is the only thing that clears one."""
     if not current.get("requested") and not current.get("missing"):
-        return dict(prior)          # this corpus names no part-voice cues
-    merged = dict(current)
-    merged["missing"] = sorted(set(prior.get("missing") or [])
-                               | set(current.get("missing") or []))
+        merged = dict(prior)          # this corpus names no part-voice cues
+    else:
+        merged = dict(current)
+        merged["missing"] = sorted(
+            set(prior.get("missing") or []) | set(current.get("missing") or []))
+    # The ledger describes the corpus on disk, not the runs that found gaps:
+    # a cue a package on disk answers is no longer missing, whichever run
+    # booked it.
+    merged["missing"] = [cue for cue in merged.get("missing") or []
+                         if cue not in answered_on_disk]
     return merged
 
 
-def _merge_corpus(path, document):
+def _merge_corpus(path, document, answered_on_disk):
     """Fold this run's account into the corpus ledger already on disk.
 
     A family this run asked nothing about keeps its previous summary; a
     family it did ask for adds this run's counts and merges its named
     entries by name.  The part-voice check keeps every unanswered name any
-    run has found.
+    run has found, minus the ones packages on disk now answer.
     """
     prior = json.loads(path.read_text(encoding="utf-8"))
     merged = dict(document)
@@ -253,7 +273,8 @@ def _merge_corpus(path, document):
     old_parts = prior.get("partVoiceCues")
     if old_parts is not None:
         merged["partVoiceCues"] = _merge_part_voice(old_parts,
-                                                    document["partVoiceCues"])
+                                                    document["partVoiceCues"],
+                                                    answered_on_disk)
     return merged
 
 
@@ -271,8 +292,14 @@ def extract_audio_corpus(talks_path, manifest_path, bundle_root, out_dir,
 
     talks = json.loads(Path(talks_path).read_text(encoding="utf-8"))
     manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
-    names = list((manifest.get("bundles") or {}).keys())
+    bundles = manifest.get("bundles") or {}
+    names = list(bundles)
     manifest_set = set(names)
+    # Entries the manifest marks as part of the player build are not on the
+    # download path, so their absence from the decrypted tree is a named
+    # fact about them rather than a download somebody forgot.
+    builtin_flats = {name.replace("/", "__") for name in names
+                     if (bundles.get(name) or {}).get("isBuiltin")}
 
     audio_root = Path(out_dir) / "audio"
     audio_root.mkdir(parents=True, exist_ok=True)
@@ -292,10 +319,13 @@ def extract_audio_corpus(talks_path, manifest_path, bundle_root, out_dir,
                             "reason": NO_PACKAGE})
             continue
         plan["talk-voice"].append((flat, cues))
-    for prefix, family in ((SE, "se"), (BGM, "bgm"), (PART_VOICE, "part-voice")):
-        for flat in prefix_packages(names, prefix, prefix.replace("/", "__"),
-                                    exclude=existing):
-            plan[family].append((flat, None))
+    for family, prefixes in (("se", (SE,)), ("bgm", (BGM,)),
+                             ("part-voice", PART_VOICE)):
+        for prefix in prefixes:
+            for flat in prefix_packages(names, prefix,
+                                        prefix.replace("/", "__"),
+                                        exclude=existing):
+                plan[family].append((flat, None))
 
     library = Library(audio_root, "audio", decoder, transcoder)
     store = PackageStore([], bundle_root)
@@ -304,7 +334,11 @@ def extract_audio_corpus(talks_path, manifest_path, bundle_root, out_dir,
     walked = 0
     for family, wanted in plan.items():
         for flat, cues in wanted:
-            if _extract_one(store, library, flat, cues, failures[family]):
+            # A package the manifest marks as player-build names its own
+            # reason when it is absent; anything else is simply not there.
+            absent = BUILT_IN if flat in builtin_flats else NO_BUNDLE
+            if _extract_one(store, library, flat, cues, failures[family],
+                            absent_reason=absent):
                 done[family] += 1
             walked += 1
             if walked % CHECKPOINT_EVERY == 0:
@@ -330,18 +364,21 @@ def extract_audio_corpus(talks_path, manifest_path, bundle_root, out_dir,
 
     # The corpus also names part-voice cues; whether the packages answer them
     # is a consumer-side check, not part of any denominator.  It reads the
-    # merged library, so streams a previous run decoded count as answered.
+    # merged library — both sides of the family — so streams a previous run
+    # decoded count as answered.
     part_cues = sorted(
         {cue for talk in _corpus_talks(talks)
          for cue in talk.get("voices") or []
          if cue.startswith("partvoice_")})
-    answered = {stream.get("cue") for entry in loop["packages"]
-                if entry["package"].startswith(PART_VOICE.replace("/", "__"))
-                for stream in entry["streams"] if stream.get("wav")}
+    part_prefixes = tuple(prefix.replace("/", "__") for prefix in PART_VOICE)
+    answered_on_disk = {stream.get("cue") for entry in loop["packages"]
+                        if any(entry["package"].startswith(prefix)
+                               for prefix in part_prefixes)
+                        for stream in entry["streams"] if stream.get("wav")}
     part_voice_cues = {"requested": len(part_cues),
-                       "answered": len(answered & set(part_cues)),
+                       "answered": len(answered_on_disk & set(part_cues)),
                        "missing": [cue for cue in part_cues
-                                   if cue not in answered]}
+                                   if cue not in answered_on_disk]}
 
     document = {"version": 1, "semantics": SEMANTICS, "families": families,
                 "partVoiceCues": part_voice_cues,
@@ -349,7 +386,7 @@ def extract_audio_corpus(talks_path, manifest_path, bundle_root, out_dir,
                          "packages": len(loop["packages"])}}
     path = audio_root / "corpus.json"
     if path.exists():
-        document = _merge_corpus(path, document)
+        document = _merge_corpus(path, document, answered_on_disk)
     path.write_text(dumps(document) + "\n", encoding="utf-8", newline="\n")
     document["path"] = str(path)
     document["audio"] = loop

@@ -81,6 +81,30 @@ STREAM_NAMES = {
     "mysekai__sound__bgm__music0001": "music0001",
     "mysekai__talk__part_voice__mysekai_part_voice_v2_21miku_idol":
         "partvoice_01_021_idol",
+    "sound__scenario__voice__part_voice_v2_21miku_light_sound":
+        "partvoice_01_021_light_sound",
+}
+
+# The scenario side of the part-voice family, as the manifest carries it: one
+# downloadable package, one the manifest marks as part of the player build
+# (never on the download path), and one on the older scenario path that the
+# talk chain does not name at all.
+SCENARIO_MANIFEST = {
+    "bundles": {
+        "mysekai/talk/part_voice/mysekai_part_voice_v2_21miku_idol": {},
+        "sound/scenario/voice/part_voice_v2_21miku_light_sound": {},
+        "sound/scenario/voice/part_voice_21miku_piapro": {"isBuiltin": True},
+        "sound/scenario/part_voice/21miku_light_sound": {},
+    }
+}
+
+SCENARIO_TALKS = {
+    "talks": [
+        {"lua": "mysekai_talk_alpha_001", "voices": [
+            "partvoice_01_021_light_sound",
+            "partvoice_01_021_band",
+        ]},
+    ],
 }
 
 
@@ -371,3 +395,72 @@ def test_loop_merge_replaces_and_keeps_order(tmp_path):
         ["a", "b", "c"]
     assert document["packages"][1]["streams"] == [2]   # the new entry won
     assert document["file"] == "audio/loop.json"
+
+
+def test_scenario_side_is_part_of_the_part_voice_family(tmp_path,
+                                                        monkeypatch,
+                                                        decoder):
+    talks = tmp_path / "fixture-talks.json"
+    talks.write_text(json.dumps(SCENARIO_TALKS), encoding="utf-8",
+                     newline="\n")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(SCENARIO_MANIFEST), encoding="utf-8",
+                        newline="\n")
+    out = tmp_path / "phenomena"
+    (out / "audio").mkdir(parents=True)
+    monkeypatch.setattr("core.assets.packages.PackageStore", _FakeStore)
+
+    report = audio_corpus.extract_audio_corpus(
+        talks, manifest, str(tmp_path / "bundles"), out, decoder=decoder)
+
+    family = report["families"]["part-voice"]
+    # both sides of the family are asked for whole; the player-build entry is
+    # asked for too and names why it cannot be fetched; the older scenario
+    # path is not part of the family at all
+    assert family["requested"] == 3
+    assert family["succeeded"] == 2
+    assert family["failed"] == [{
+        "package": "sound__scenario__voice__part_voice_21miku_piapro",
+        "reason": audio_corpus.BUILT_IN,
+    }]
+    # the scenario-side stream answers the corpus's scenario cue
+    assert report["partVoiceCues"] == {"requested": 2, "answered": 1,
+                                       "missing": ["partvoice_01_021_band"]}
+    loop = json.loads((out / "audio" / "loop.json").read_text(
+        encoding="utf-8"))
+    assert "sound__scenario__voice__part_voice_v2_21miku_light_sound" in \
+        [entry["package"] for entry in loop["packages"]]
+
+
+def test_partvoice_missing_clears_when_a_package_answers_it(tmp_path,
+                                                            monkeypatch,
+                                                            decoder):
+    talks = tmp_path / "fixture-talks.json"
+    talks.write_text(json.dumps(SCENARIO_TALKS), encoding="utf-8",
+                     newline="\n")
+    manifest = tmp_path / "manifest.json"
+    without = {"bundles": {
+        "mysekai/talk/part_voice/mysekai_part_voice_v2_21miku_idol": {}}}
+    manifest.write_text(json.dumps(without), encoding="utf-8", newline="\n")
+    out = tmp_path / "phenomena"
+    (out / "audio").mkdir(parents=True)
+    monkeypatch.setattr("core.assets.packages.PackageStore", _FakeStore)
+
+    # first run: the scenario package is not in the manifest, so the cue is
+    # booked missing
+    report = audio_corpus.extract_audio_corpus(
+        talks, manifest, str(tmp_path / "bundles"), out, decoder=decoder)
+    assert report["partVoiceCues"]["missing"] == \
+        ["partvoice_01_021_band", "partvoice_01_021_light_sound"]
+
+    # second run: the package is in the manifest and extracts, and the name
+    # it booked leaves the books — the ledger describes the corpus on disk
+    manifest.write_text(json.dumps(SCENARIO_MANIFEST), encoding="utf-8",
+                        newline="\n")
+    report = audio_corpus.extract_audio_corpus(
+        talks, manifest, str(tmp_path / "bundles"), out, decoder=decoder)
+    assert report["partVoiceCues"] == {"requested": 2, "answered": 1,
+                                       "missing": ["partvoice_01_021_band"]}
+    corpus = json.loads((out / "audio" / "corpus.json").read_text(
+        encoding="utf-8"))
+    assert corpus["partVoiceCues"] == report["partVoiceCues"]
