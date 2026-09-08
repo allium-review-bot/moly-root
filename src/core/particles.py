@@ -30,6 +30,13 @@ SHAPE_TYPES = {0: "Sphere", 1: "SphereShell", 2: "Hemisphere", 3: "HemisphereShe
                9: "ConeVolumeShell", 10: "Circle", 11: "CircleEdge",
                12: "SingleSidedEdge", 15: "BoxShell", 16: "BoxEdge", 17: "Donut",
                18: "Rectangle", 19: "Sprite"}
+# How the emission point is placed along the arc (or the radius of an edge
+# shape, or a mesh's spawn positions: one serialized struct, one value domain).
+# Random draws the point anew within the arc for every particle; Loop and
+# PingPong animate it around the arc at the arc's speed curve, PingPong
+# reversing where Loop wraps; BurstSpread spaces the particles out along the
+# arc instead of placing them randomly.
+ARC_MODES = {0: "Random", 1: "Loop", 2: "PingPong", 3: "BurstSpread"}
 RENDER_MODES = {0: "Billboard", 1: "Stretch", 2: "HorizontalBillboard",
                 3: "VerticalBillboard", 4: "Mesh", 5: "None"}
 SIMULATION_SPACES = {0: "Local", 1: "World", 2: "Custom"}
@@ -373,6 +380,12 @@ def decode_system(tree, resolve_node=None):
             "arc": float(shape.get("arc", {}).get("value", 0.0)
                                if isinstance(shape.get("arc"), dict)
                                else shape.get("arc", 0.0)),
+            # The arc is serialized as one struct holding the extent, how the
+            # emission point moves along it, and that movement's spread and
+            # speed; the mode is that struct's `mode`, not a sibling field.
+            "arcMode": (ARC_MODES.get(shape["arc"].get("mode"),
+                                      shape["arc"].get("mode"))
+                        if isinstance(shape.get("arc"), dict) else None),
             "boxThickness": _vec(shape.get("boxThickness", {})),
             "donutRadius": float(shape.get("donutRadius", 0.0)),
             "position": _vec(shape.get("m_Position", {})),
