@@ -176,6 +176,24 @@ def main(argv=None):
     sg.add_argument("--master-cache", help="where fetched tables are cached")
     sg.add_argument("--out", required=True)
 
+    bp = sub.add_parser("birthday-parties",
+                        help="extract the birthday-party campaign table the "
+                             "site-map festival gate reads (startAt/closedAt windows)")
+    bp.add_argument("--master", help="directory of caller-supplied master tables")
+    bp.add_argument("--master-url", nargs="?", const="", default=None,
+                    help="base URL to append <table>.json to; no value uses the public default base")
+    bp.add_argument("--master-cache", help="where fetched tables are cached")
+    bp.add_argument("--out", required=True)
+
+    cc = sub.add_parser("client-config",
+                        help="extract the ClientConfig deliverable panel "
+                             "(the four typed dictionaries, keyed by id)")
+    cc.add_argument("--master", help="directory of caller-supplied master tables")
+    cc.add_argument("--master-url", nargs="?", const="", default=None,
+                    help="base URL to append <table>.json to; no value uses the public default base")
+    cc.add_argument("--master-cache", help="where fetched tables are cached")
+    cc.add_argument("--out", required=True)
+
     e = sub.add_parser("emoticons", help="extract overhead-item effect packages")
     e.add_argument("--bundle", action="append", required=True); e.add_argument("--out-dir", required=True)
     v = sub.add_parser("avatar-parts", help="extract player-appearance packages (skin/decoration/penlight)")
@@ -223,6 +241,19 @@ def main(argv=None):
                                        "(vgmstream-cli), or the directory holding it")
     a.add_argument("--ffmpeg", help="path to ffmpeg, used only to write a compressed "
                                     "copy of each decoded sound")
+    r = sub.add_parser("partvoice-routes",
+                       help="build the speaker-to-partvoice-package routing "
+                            "table from master tables and the roster")
+    r.add_argument("--master", help="directory of caller-supplied master tables")
+    r.add_argument("--master-url", nargs="?", const="", default=None,
+                   help="base URL to append <table>.json to; no value uses the public default base")
+    r.add_argument("--master-cache", help="where fetched tables are cached")
+    r.add_argument("--roster", required=True,
+                   help="characters.json, the registry artifact; its "
+                        "characters are the participants' universe and order")
+    r.add_argument("--out-dir", required=True,
+                   help="the phenomena output directory whose audio/ receives "
+                        "partvoice.json")
     q = sub.add_parser("site", help="extract the site (place) asset packages")
     q.add_argument("--bundle", action="append", required=True,
                    help="a package under the site path; repeat for as many as wanted")
@@ -403,6 +434,26 @@ def main(argv=None):
                          ensure_ascii=False))
         return 0
 
+    if args.cmd == "birthday-parties":
+        source, cache = _master_source(args)
+        if not source:
+            ap.error("birthday-parties needs master tables: "
+                     "pass --master <dir> or --master-url")
+        from sites.birthday_parties import extract_birthday_parties
+        print(json.dumps(extract_birthday_parties(source, args.out, master_cache=cache),
+                         ensure_ascii=False))
+        return 0
+
+    if args.cmd == "client-config":
+        source, cache = _master_source(args)
+        if not source:
+            ap.error("client-config needs master tables: "
+                     "pass --master <dir> or --master-url")
+        from core.client_config import extract_client_config
+        print(json.dumps(extract_client_config(source, args.out, master_cache=cache),
+                         ensure_ascii=False))
+        return 0
+
     if args.cmd == "emoticons":
         from chara.emoticons import extract_emoticons
         print(json.dumps(extract_emoticons(args.bundle, args.out_dir), ensure_ascii=False))
@@ -431,6 +482,21 @@ def main(argv=None):
                                       decoder=args.vgmstream,
                                       transcoder=args.ffmpeg)
         print(json.dumps({k: v for k, v in report.items() if k != "audio"},
+                         ensure_ascii=False))
+        return 0
+    if args.cmd == "partvoice-routes":
+        source, cache = _master_source(args)
+        if not source:
+            ap.error("partvoice-routes needs master tables: "
+                     "pass --master <dir> or --master-url")
+        from .master import Master
+        from phenomena.partvoice import (build_partvoice_routes,
+                                         route_counts, write_partvoice_routes)
+        roster = json.loads(Path(args.roster).read_text(encoding="utf-8"))
+        document = build_partvoice_routes(Master(source, cache_dir=cache),
+                                          roster)
+        path = write_partvoice_routes(document, args.out_dir)
+        print(json.dumps({**route_counts(document), "file": str(path)},
                          ensure_ascii=False))
         return 0
     if args.cmd == "site":
