@@ -193,6 +193,44 @@ class Master:
             out[row["groupId"]].append(types.get(row["mysekaiCharacterTalkConditionId"]))
         return dict(out)
 
+    def condition_entries(self):
+        """{conditionGroupId: [{conditionType, conditionTypeValue}, ...]}.
+
+        The value payload beside :meth:`condition_types`: the same group
+        mapping in the same order, each entry carrying the condition's type
+        name and the value the conditions table holds for it on
+        ``mysekaiCharacterTalkConditionTypeValue`` — the field the phenomena
+        and visit-count gates compare against.  The conditions table is the
+        only place the value lives, so a condition id that table does not
+        have resolves to null type and null value: the same absence rule the
+        bare type list applies, kept so the two arrays cannot disagree about
+        one group row.
+        """
+        entries = {row["id"]: row
+                   for row in self.table("mysekaiCharacterTalkConditions")}
+        out = defaultdict(list)
+        for row in self.table("mysekaiCharacterTalkConditionGroups"):
+            entry = entries.get(row["mysekaiCharacterTalkConditionId"]) or {}
+            out[row["groupId"]].append({
+                "conditionType": entry.get("mysekaiCharacterTalkConditionType"),
+                "conditionTypeValue": entry.get(
+                    "mysekaiCharacterTalkConditionTypeValue"),
+            })
+        return dict(out)
+
+    def site_groups(self):
+        """{siteGroupId: [siteId, ...]} from the ``mysekaiSiteGroups`` table.
+
+        A pure membership table: rows of (groupId, siteId), nothing else.
+        The environment-site talk gate reads it as a mapping — the talk row
+        names a ``mysekaiSiteGroupId`` and the gate asks whether the site
+        the player stands in is a member.  Site ids keep table order.
+        """
+        out = defaultdict(list)
+        for row in self.table("mysekaiSiteGroups"):
+            out[row["groupId"]].append(row["mysekaiSiteId"])
+        return dict(out)
+
     def tweets(self):
         """{tweetId: row} — each carries text plus a motion and facial pattern."""
         return {row["id"]: row for row in self.table("mysekaiCharacterTalkTweets")}

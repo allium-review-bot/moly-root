@@ -164,6 +164,15 @@ def main(argv=None):
     tt.add_argument("--master-cache", help="where fetched tables are cached")
     tt.add_argument("--out", required=True)
 
+    sg = sub.add_parser("site-groups",
+                        help="extract the mysekai site-group table "
+                             "(siteGroupId -> the site ids it holds)")
+    sg.add_argument("--master", help="directory of caller-supplied master tables")
+    sg.add_argument("--master-url", nargs="?", const="", default=None,
+                    help="base URL to append <table>.json to; no value uses the public default base")
+    sg.add_argument("--master-cache", help="where fetched tables are cached")
+    sg.add_argument("--out", required=True)
+
     e = sub.add_parser("emoticons", help="extract overhead-item effect packages")
     e.add_argument("--bundle", action="append", required=True); e.add_argument("--out-dir", required=True)
     v = sub.add_parser("avatar-parts", help="extract player-appearance packages (skin/decoration/penlight)")
@@ -375,6 +384,16 @@ def main(argv=None):
                      "pass --master <dir> or --master-url")
         from chara.tweet_tables import extract_tweet_tables
         print(json.dumps(extract_tweet_tables(source, args.out, master_cache=cache),
+                         ensure_ascii=False))
+        return 0
+
+    if args.cmd == "site-groups":
+        source, cache = _master_source(args)
+        if not source:
+            ap.error("site-groups needs master tables: "
+                     "pass --master <dir> or --master-url")
+        from sites.site_groups import extract_site_groups
+        print(json.dumps(extract_site_groups(source, args.out, master_cache=cache),
                          ensure_ascii=False))
         return 0
 

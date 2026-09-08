@@ -147,15 +147,24 @@ Each entry of `units[<unitId>].talks[]`:
 | `lua` | Script name. The scripts live in the talk scenario bundle (one bundle for all talks); the asset name inside it carries **one extra `.lua` suffix**. |
 | `siteGroupId` / `termId` | Site group and term; their value semantics are not established, so they are passed through as stored. |
 | `conditions` | Condition types of this talk's condition group (furniture-gated talks are excluded by the predicate, so only phenomena, visit count, and event-story types appear). |
+| `conditionValues` | The value payload **parallel to `conditions`, same order**: each entry is `{conditionType, conditionTypeValue}`, the value taken from the master conditions row's `mysekaiCharacterTalkConditionTypeValue` field — the number the phenomena and visit-count gates compare against. A condition the source gives no value for exports `null`, never a default. |
 | `tweet` | `{id, text, motion, eye, mouth}`; `text` is verbatim and contains `\n`. **This is the second source of motion↔facial pairing, alongside the alone-action performance data.** |
 | `voices` | Voice cue names referenced by the script. **The voice bytes are not in this bundle**, and this repository does not assert a cue-to-bundle mapping (not established). |
 | `steps` | Ordered performance steps parsed from the script, each tagged with an `op`. |
+
+**Condition value payload**: the current corpus holds 1532 conditions across its 1412 rows, **every one carrying a value** (`summary.conditions.nullValue` is 0); by type, `mysekai_character_visit_count` 1050, `mysekai_phenomena_id` 420, `read_event_story_episode_id` 62. 300 rows have condition groups that are **entirely phenomena-type** — exactly the rows the phenomena gate used to fail-closed exclude for lack of values; the 14 phenomena values (1–11, 14, 15, 17) appear on 30 rows each. The counts live in `summary.conditions`.
 
 A step's `op` is the script call name. Fourteen appear in the current content: `change_npc_eye` 5037, `change_animation` 3827, `change_npc_mouth` 3724, `label` / `text` / `wait_click` 3571 each, `voice` 3137, `look_at_body` 2823, `wait_time` 1413, `emoticon` 355, `show_talk_window` / `hide_talk_window` 2 each, `hide_emoticon` 1, and `wait_time_on_auto_mode` 1. The parser knows more call names than these fourteen; **every matched call must be accounted for in `steps` exactly once, and a mismatch raises** rather than dropping a step silently.
 
 Motion playback rate follows the same contract as the alone-action data: `speed` is what the script passes and `playbackSpeed` is what the runtime actually uses (it reads 0 as 1.0).
 
 **Constants are not resolved**: the talk scenario bundle carries no constant tables, so named constants such as `Characters.X`, `EyePresets.x`, `LipSyncPresets.x`, and `Motions.x` are **kept verbatim as strings** (an empty `summary.constantTables` says as much). This repository does not guess those mappings; supply your own constant tables if you need resolved values.
+
+## `site-groups.json`
+
+The membership export of the `mysekaiSiteGroups` master table (the `moly site-groups` command; master-only input, same family as `tweets`, not a bundle product): the environment-site talk gate (source `IsMatchedEnvironmentSiteCondition`) uses it to turn a talk row's `siteGroupId` into "is the site the player stands in a member".
+
+The top level is `version`, `semantics`, `groups`, and `summary`. Each `groups` entry is `{siteGroupId, sites[]}`: rows in master-table order, `sites` in table order within the group; the source carries nothing but membership, so the list **implies no order or weight within a group**. Current content: 12 rows, 4 groups, 8 distinct sites — `1→[1] · 2→[2,3,4] · 3→[5,6,7,8] · 4→[1,2,3,4]`. Group 4 holding all four sites is what the source itself says; one site may belong to several groups, and membership is looked up **per group — never merge and deduplicate**.
 
 ## `emoticons/`
 

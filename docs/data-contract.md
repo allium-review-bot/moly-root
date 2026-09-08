@@ -141,11 +141,14 @@ cloth 包含坐标系、版本声明、组件、碰撞体、统计和结构检�
 | `lua` | 脚本名。脚本本体在对话脚本包里（全部对话共用一个包），包内资产名比这里**多一个 `.lua` 后缀**。 |
 | `siteGroupId` / `termId` | 站点组与时段；取值语义未取证，原样给出。 |
 | `conditions` | 该对话条件组里的条件类型（家具型的对话已被判据排除，所以这里只会出现现象、访问次数、活动剧情三类）。 |
+| `conditionValues` | 与 `conditions` **同序平行**的值载荷：每项 `{conditionType, conditionTypeValue}`，值取自 master 条件表行上的 `mysekaiCharacterTalkConditionTypeValue` 字段（现象门、访问次数门拿去比对的就是它）；源表没给值就导 `null`，不造默认。 |
 | `tweet` | `{id, text, motion, eye, mouth, emoticon}`；`text` 是原文含 `\n`。**这是除独处编排之外的第二处「动作↔表情」配对来源。** |
 
 选链三主表在 `tweet-tables.json`（与 `tweets.json` 同源 master 链，非 bundle 产物）：
 `withoutRelatedTalks` 660 · `greetings` 180（含 `greetingConditions` 6——恰两个已知条件类型）
 · `siteEntries` 90 · `talkPreActions` 6180。**行序 = master 表序**（序是数据的一部分，消费方不得按键重排）。
+
+**条件值载荷**：当前语料 1412 行共 1532 条条件，**全部带值**（`summary.conditions.nullValue` 为 0）；按类型 `mysekai_character_visit_count` 1050 · `mysekai_phenomena_id` 420 · `read_event_story_episode_id` 62。300 行的条件组**全部**为现象型——现象门此前因缺值 fail-closed 排除的正是这些行；14 个现象值（1–11、14、15、17）各出现在 30 行上。计数在 `summary.conditions`。
 | `voices` | 脚本里引用的语音 cue 名。**语音字节不在这个包里**，本仓也不提供 cue 到语音包的映射（未取证）。 |
 | `steps` | 按脚本顺序解析出的编排步骤，每步带 `op`。 |
 
@@ -154,6 +157,12 @@ cloth 包含坐标系、版本声明、组件、碰撞体、统计和结构检�
 动作步骤的播放速率与独处编排同一套：`speed` 是脚本写的值、`playbackSpeed` 是运行时实际使用的值（运行时把 0 读作 1.0）。
 
 **常量未解析**：对话脚本包里没有常量表，所以 `Characters.X`、`EyePresets.x`、`LipSyncPresets.x`、`Motions.x` 这类具名常量**原样保留为字符串**（`summary.constantTables` 为空即表示如此）。本仓不猜这些名字到真值的映射；需要真值时请自行提供常量表。
+
+## `site-groups.json`
+
+`mysekaiSiteGroups` 主表的成员表导出（`moly site-groups` 命令，只需 master 输入，同 `tweets` 家族，非 bundle 产物）：环境站点对话门（源码 `IsMatchedEnvironmentSiteCondition`）用它把对话行上的 `siteGroupId` 换算成「玩家所站站点是否在册」。
+
+顶层为 `version`、`semantics`、`groups`、`summary`。`groups` 每项 `{siteGroupId, sites[]}`：行序 = master 表序、组内 `sites` 保持表序；源表只有成员关系，列表**不隐含组内顺序或权重**。当前内容：12 行、4 组、8 个不同站点——`1→[1] · 2→[2,3,4] · 3→[5,6,7,8] · 4→[1,2,3,4]`。第 4 组装下全部四站是源数据自己说的；同一站可属多组，求成员资格**按组查，不得合并去重**。
 
 ## `emoticons/`
 

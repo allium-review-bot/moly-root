@@ -612,6 +612,15 @@ def _semantics(source):
         "text": "text is preserved as decoded source text, including newline characters",
         "voiceCues": "voice cue names occur in scripts; audio bytes are not in the talk bundle",
         "tweet": "tweet is the separate text, motion, eye, and mouth pairing from the master tables",
+        "conditionValues": (
+            "parallel to conditions, same order, built from the same group "
+            "rows: each entry carries the condition's type and the value the "
+            "master conditions table holds on "
+            "mysekaiCharacterTalkConditionTypeValue -- the field the "
+            "phenomena and visit-count gates compare against. A condition "
+            "with no value there exports null, never a default; conditions "
+            "stays the bare type-name list it has always been"
+        ),
         "constants": {
             "source": (f"{LIB_PACKAGE}/{source}" if source else None),
             "rule": (
@@ -647,11 +656,15 @@ def extract_talks(master_source, talk_bundle, out_path, master_cache=None,
     selected, filter_report = master.solo_talks()
     tweets = master.tweets()
     conditions = master.condition_types()
+    condition_payloads = master.condition_entries()
     assets = _text_assets(talk_bundle)
     tables, scalars, constant_source = read_constants(lib_bundle)
     units, operations, all_voices = {}, Counter(), []
     selected_scripts = []
     total_steps = 0
+    payload_types = Counter()
+    payload_entries = 0
+    payload_valued = 0
     for item in selected:
         row, unit = item["talk"], item["unitId"]
         lua = row.get("lua", "")
@@ -666,14 +679,20 @@ def extract_talks(master_source, talk_bundle, out_path, master_cache=None,
         tweet_id = item.get("tweetId")
         if tweet_id is not None and tweet_id not in tweets:
             raise LookupError(f"talk {row.get('id')}: tweet not found: {tweet_id}")
+        group_id = row.get("mysekaiCharacterTalkConditionGroupId")
+        payload = list(condition_payloads.get(group_id, []))
+        for entry in payload:
+            payload_types[entry["conditionType"]] += 1
+            payload_entries += 1
+            if entry["conditionTypeValue"] is not None:
+                payload_valued += 1
         talk = {
             "talkId": row.get("id"),
             "lua": lua,
             "siteGroupId": row.get("mysekaiSiteGroupId"),
             "termId": row.get("mysekaiCharacterTalkTermId"),
-            "conditions": list(conditions.get(
-                row.get("mysekaiCharacterTalkConditionGroupId"), []
-            )),
+            "conditions": list(conditions.get(group_id, [])),
+            "conditionValues": payload,
             "tweet": _tweet(tweets.get(tweet_id)) if tweet_id is not None else None,
             "voices": parsed["voices"],
             "steps": parsed["steps"],
@@ -690,6 +709,12 @@ def extract_talks(master_source, talk_bundle, out_path, master_cache=None,
         "voiceCues": len(all_voices),
         "uniqueVoiceCues": len(set(all_voices)),
         "operations": dict(operations),
+        "conditions": {
+            "entries": payload_entries,
+            "withValue": payload_valued,
+            "nullValue": payload_entries - payload_valued,
+            "types": dict(sorted(payload_types.items())),
+        },
         "constants": {
             "source": (f"{LIB_PACKAGE}/{constant_source}"
                        if constant_source else None),

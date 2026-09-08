@@ -29,13 +29,19 @@ def _master(tmp_path):
         {"id": 2, "gameCharacterUnitId1": 12, "gameCharacterUnitId2": 21},   # 双人
     ])
     _write(d, "mysekaiCharacterTalkConditions", [
-        {"id": 100, "mysekaiCharacterTalkConditionType": "mysekai_phenomena_id"},
+        {"id": 100, "mysekaiCharacterTalkConditionType": "mysekai_phenomena_id",
+         "mysekaiCharacterTalkConditionTypeValue": 3},
         {"id": 200, "mysekaiCharacterTalkConditionType": "mysekai_fixture_id"},
     ])
     # 组表是映射表:一行一个 (组, 条件) 对,键是 groupId 而不是它自己的 id
     _write(d, "mysekaiCharacterTalkConditionGroups", [
         {"id": 1, "groupId": 10, "mysekaiCharacterTalkConditionId": 100},
         {"id": 2, "groupId": 20, "mysekaiCharacterTalkConditionId": 200},
+    ])
+    _write(d, "mysekaiSiteGroups", [
+        {"id": 1, "groupId": 1, "mysekaiSiteId": 1},
+        {"id": 2, "groupId": 2, "mysekaiSiteId": 2},
+        {"id": 3, "groupId": 2, "mysekaiSiteId": 3},
     ])
     _write(d, "mysekaiCharacterTalks", [
         {"id": 1, "mysekaiGameCharacterUnitGroupId": 1, "mysekaiCharacterTalkConditionGroupId": 10,
@@ -67,6 +73,31 @@ def test_condition_groups_are_keyed_by_group_not_by_row_id(master):
     # 用行自己的 id 当组 id 会把条件挂到错误的组上,家具门就漏判。
     assert master.condition_types() == {10: ["mysekai_phenomena_id"],
                                         20: ["mysekai_fixture_id"]}
+
+
+def test_condition_entries_carry_type_and_value(master):
+    # 值载荷与类型表同组同序;值字段在源条件表行上
+    # (mysekaiCharacterTalkConditionTypeValue),缺值照实 null 不造默认。
+    assert master.condition_entries() == {
+        10: [{"conditionType": "mysekai_phenomena_id",
+              "conditionTypeValue": 3}],
+        20: [{"conditionType": "mysekai_fixture_id",
+              "conditionTypeValue": None}],
+    }
+
+
+def test_condition_entries_and_types_stay_parallel(master):
+    # 两个读法读同一份组行,一个组行在两边必须同位同类型——
+    # 消费侧拿类型名定位、拿值求值,错位就是错门。
+    types, entries = master.condition_types(), master.condition_entries()
+    assert set(types) == set(entries)
+    for group, names in types.items():
+        assert names == [entry["conditionType"] for entry in entries[group]]
+
+
+def test_site_groups_keep_table_order(master):
+    # 成员表就是 (组, 站) 行本身;站 id 保持表序,组按首次出现序。
+    assert master.site_groups() == {1: [1], 2: [2, 3]}
 
 
 def test_predicate_drops_both_kinds_and_says_which(master):

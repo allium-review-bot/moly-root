@@ -53,7 +53,8 @@ def master_dir(tmp_path):
 
     write("mysekaiGameCharacterUnitGroups", [{"id": 1, "gameCharacterUnitId1": 12}])
     write("mysekaiCharacterTalkConditions", [
-        {"id": 10, "mysekaiCharacterTalkConditionType": "mysekai_phenomena_id"},
+        {"id": 10, "mysekaiCharacterTalkConditionType": "mysekai_phenomena_id",
+         "mysekaiCharacterTalkConditionTypeValue": 3},
     ])
     write("mysekaiCharacterTalkConditionGroups", [
         {"id": 10, "groupId": 20, "mysekaiCharacterTalkConditionId": 10},
@@ -156,6 +157,16 @@ def test_extract_collects_voice_cues_and_null_tweet(monkeypatch, master_dir, tmp
     talk = doc["units"]["12"]["talks"][0]
     assert talk["lua"] == "talk_alpha"
     assert talk["conditions"] == ["mysekai_phenomena_id"]
+    # 值载荷是加键不改旧键:conditions 保持裸类型名表,conditionValues
+    # 与它同序平行,每条带源条件表行上的值字段。
+    assert talk["conditionValues"] == [
+        {"conditionType": "mysekai_phenomena_id", "conditionTypeValue": 3},
+    ]
+    assert doc["summary"]["conditions"] == {
+        "entries": 1, "withValue": 1, "nullValue": 0,
+        "types": {"mysekai_phenomena_id": 1},
+    }
+    assert doc["semantics"]["conditionValues"]
     assert talk["tweet"] is None
     assert talk["voices"] == ["cue.alpha"]
     assert report["voiceCues"] == 1
