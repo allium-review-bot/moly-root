@@ -361,6 +361,67 @@ def test_empty_bundle_root_names_each_unresolved_dependency_shader(tmp_path,
     assert all(dep.name in record["reason"] for record in records)
 
 
+def test_material_extras_record_shader_keyword_state(tmp_path, monkeypatch):
+    """Red when the keyword state is dropped again: a material's serialized
+    keyword arrays (``m_ValidKeywords`` / ``m_InvalidKeywords``) and the parsed
+    union must all reach the glb extras -- D67 could only read them by opening
+    the source bundles because this exporter used to leave them out."""
+    pkg = _Package("mysekai__fixture__mdl_keywords")
+    goid, _ = pkg.node("furniture")
+    mesh_id = pkg.mesh([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [0, 1, 2])
+    mat = pkg.material(name="keyword-mat")
+    mat_obj = next(obj for obj in pkg.objects if obj.path_id == mat)
+    mat_obj._tree["m_ValidKeywords"] = ["_DISABLE_DITHER", "_RECEIVE_SHADOWS_OFF"]
+    mat_obj._tree["m_InvalidKeywords"] = ["_ENABLE_EMISSION_ON"]
+    pkg.renderer(goid, mesh_id, [mat])
+    _run(tmp_path, monkeypatch, {pkg.name: pkg.finish()})
+    extras = _glb(tmp_path / "out" / f"{pkg.name}.glb")["materials"][0]["extras"]
+    assert extras["validKeywords"] == ["_DISABLE_DITHER", "_RECEIVE_SHADOWS_OFF"]
+    assert extras["invalidKeywords"] == ["_ENABLE_EMISSION_ON"]
+    # the parsed form is the concatenation, valid first -- the order the
+    # Material.shaderKeywords API hands back
+    assert extras["shaderKeywords"] == ["_DISABLE_DITHER", "_RECEIVE_SHADOWS_OFF",
+                                        "_ENABLE_EMISSION_ON"]
+
+
+def test_empty_keyword_arrays_are_exported_as_empty(tmp_path, monkeypatch):
+    """Red when "no keywords" is written as an absent field: enabling no valid
+    keyword is a state (the shadow-pass materials ship exactly this way), so
+    the keys must exist and hold ``[]`` -- absence would read as a gap."""
+    pkg = _Package("mysekai__fixture__mdl_keywords_empty")
+    goid, _ = pkg.node("furniture")
+    mesh_id = pkg.mesh([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [0, 1, 2])
+    mat = pkg.material(name="keywordless-mat")   # factory plants no keyword keys
+    pkg.renderer(goid, mesh_id, [mat])
+    _run(tmp_path, monkeypatch, {pkg.name: pkg.finish()})
+    extras = _glb(tmp_path / "out" / f"{pkg.name}.glb")["materials"][0]["extras"]
+    assert extras["validKeywords"] == []
+    assert extras["invalidKeywords"] == []
+    assert extras["shaderKeywords"] == []
+
+
+def test_invalid_only_keywords_keep_the_empty_valid_array(tmp_path, monkeypatch):
+    """Red when an empty valid set is folded into a missing field: a material
+    that enables only undeclared keywords (the fixture shadow-material shape)
+    must export ``validKeywords: []`` beside its invalid list."""
+    pkg = _Package("mysekai__fixture__mdl_keywords_shadow")
+    goid, _ = pkg.node("furniture")
+    mesh_id = pkg.mesh([(0, 0, 0), (1, 0, 0), (0, 1, 0)], [0, 1, 2])
+    mat = pkg.material(name="shadow-mat")
+    mat_obj = next(obj for obj in pkg.objects if obj.path_id == mat)
+    mat_obj._tree["m_ValidKeywords"] = []
+    mat_obj._tree["m_InvalidKeywords"] = ["_ENABLE_CUSTOMFIXTURE_ON",
+                                          "_ENABLE_FRESNEL_ON"]
+    pkg.renderer(goid, mesh_id, [mat])
+    _run(tmp_path, monkeypatch, {pkg.name: pkg.finish()})
+    extras = _glb(tmp_path / "out" / f"{pkg.name}.glb")["materials"][0]["extras"]
+    assert extras["validKeywords"] == []
+    assert extras["invalidKeywords"] == ["_ENABLE_CUSTOMFIXTURE_ON",
+                                         "_ENABLE_FRESNEL_ON"]
+    assert extras["shaderKeywords"] == ["_ENABLE_CUSTOMFIXTURE_ON",
+                                        "_ENABLE_FRESNEL_ON"]
+
+
 def test_skinned_meshes_are_not_exported_empty(tmp_path, monkeypatch):
     """Red when geometry on a SkinnedMeshRenderer is silently ignored: a package
     whose only renderer is a SkinnedMeshRenderer (no MeshFilter/MeshRenderer) must

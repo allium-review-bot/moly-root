@@ -313,6 +313,31 @@ def _shader_value(store, record, material_tree):
     return shader
 
 
+def _shader_keywords(tree):
+    """A material's enabled shader-keyword state, serialized arrays and parsed.
+
+    Unity 2021.2 no longer serializes a single ``m_ShaderKeywords`` field: the
+    enabled keyword set is split across ``m_ValidKeywords`` (keywords the
+    material has enabled that its shader declares) and ``m_InvalidKeywords``
+    (enabled but not declared by the shader -- tooling leftovers ride here).
+    Measured over this game's fixture materials: neither key is ever absent
+    and the legacy ``m_ShaderKeywords`` string does not exist, so the arrays
+    *are* the serialized state and are exported verbatim -- an empty list is
+    exported as ``[]`` because enabling no keyword is a state too, not a gap
+    (a shadow-pass material legitimately enables nothing valid).
+
+    ``shaderKeywords`` is the parsed form: the concatenation, valid first --
+    what Unity's ``Material.shaderKeywords`` property hands back.  The name is
+    deliberately not ``keywords``: the site and character domains export a
+    ``keywords`` field that holds only the valid half, and one name meaning
+    two things would let a consumer read the union as the valid set.
+    """
+    valid = [str(word) for word in tree.get("m_ValidKeywords") or []]
+    invalid = [str(word) for word in tree.get("m_InvalidKeywords") or []]
+    return {"validKeywords": valid, "invalidKeywords": invalid,
+            "shaderKeywords": valid + invalid}
+
+
 def _material_properties(tree, glb, record, tex_cache):
     """Every authored property of a material: floats, colors, texture slots.
 
@@ -446,6 +471,7 @@ def _material_index(glb, record, path_id, cache, tex_cache, store):
               "alphaClip": _float_prop(tt, "_AlphaClip"),
               "fixtureShaderUsage": _float_prop(tt, "_FixtureShaderUsage"),
               "shader": shader["name"] if shader["status"] == "resolved" else shader}
+    extras.update(_shader_keywords(tt))
     extras.update(_material_properties(tt, glb, record, tex_cache))
     if shader["status"] == "resolved":
         if "shaderPasses" in shader:
