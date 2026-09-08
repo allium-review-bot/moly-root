@@ -353,6 +353,17 @@ def decode_system(tree, resolve_node=None):
     if initial.get("size3D"):
         out["start"]["sizeY"] = min_max_curve(initial.get("startSizeY", {}))
         out["start"]["sizeZ"] = min_max_curve(initial.get("startSizeZ", {}))
+    # The start-rotation family serialises three curve slots -- `startRotation`,
+    # `startRotationX`, `startRotationY` -- and there is no `startRotationZ`
+    # field: the engine's own binding maps the unsuffixed slot to the z axis
+    # (the size family is the mirror image: there the unsuffixed `startSize`
+    # is the x axis).  So z is the `rotation` reported above, and 3D start
+    # rotation adds x/y, exactly as size3D adds y/z.  The InitialModule key
+    # set is constant across packages, 3D flag or not, so the slots are read
+    # by their serialized names and only exported when the flag is on.
+    if initial.get("rotation3D"):
+        out["start"]["rotationX"] = min_max_curve(initial.get("startRotationX", {}))
+        out["start"]["rotationY"] = min_max_curve(initial.get("startRotationY", {}))
 
     emission = tree.get("EmissionModule", {})
     if emission.get("enabled"):
