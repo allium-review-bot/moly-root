@@ -569,29 +569,15 @@ def _walk(glb, record, store, tpid, parent, ctx, prefix=""):
                 {"type": "mesh-unresolved", "node": name, "kind": kind})
             continue
         mesh_record, mesh_id = target
-        # ``skinned`` joins the key because glTF binds the joint attributes into
-        # the primitive: one Unity mesh drawn by both a plain and a skinned
-        # renderer needs two glTF meshes, and a primitive carrying ``JOINTS_0``
-        # on a node with no ``skin`` is invalid.
-        cache_key = (mesh_id, skinned)
-        if cache_key in ctx["mesh_cache"]:
-            node["mesh"] = ctx["mesh_cache"][cache_key]
-            if skinned:
-                _plan_skin(ctx, node, index, name, bones,
-                           ctx["skin_cache"].get(mesh_id))
-            continue
-        mesh_obj = mesh_record.objects.get(mesh_id)
-        if mesh_obj is None:
-            ctx["report"]["anomalies"].append(
-                {"type": "mesh-unresolved", "node": name})
-            continue
-        try:
-            mesh_tt = mesh_obj.read_typetree()
-            buffers = _mesh_channels(glb, mesh_obj, mesh_tt, skin=skinned)
-        except Exception:
-            ctx["report"]["anomalies"].append(
-                {"type": "mesh-unreadable", "node": name, "kind": kind})
-            continue
+        mesh_file = mesh_record.archive or mesh_record.bundle
+        # Materials are resolved before the cache is consulted because a glTF
+        # mesh carries its materials: compose_mesh binds one material per
+        # submesh into the primitives, so "which mesh" and "drawn with which
+        # materials" name one glTF mesh together.  A Unity mesh that two
+        # renderers draw with different materials therefore needs two glTF
+        # meshes over the same geometry, and a cache key that omits the
+        # materials hands every later renderer the first one's binding -- the
+        # later renderer's own material pointers are then never read at all.
         materials = {}
         for sub_index, mat_pointer in enumerate(material_pointers):
             if not (mat_pointer or {}).get("m_PathID"):
@@ -609,10 +595,45 @@ def _walk(glb, record, store, tpid, parent, ctx, prefix=""):
             except ValueError:
                 ctx["report"]["anomalies"].append(
                     {"type": "material-unresolved", "node": name})
+        # ``skinned`` joins the key because glTF binds the joint attributes into
+        # the primitive: one Unity mesh drawn by both a plain and a skinned
+        # renderer needs two glTF meshes, and a primitive carrying ``JOINTS_0``
+        # on a node with no ``skin`` is invalid.  The mesh names its serialized
+        # file as well, because a path id is unique only within its file -- the
+        # material cache keys the same way -- and the resolved materials join
+        # for the reason above.
+        cache_key = (mesh_file, mesh_id, skinned,
+                     tuple(sorted(materials.items())))
+        if cache_key in ctx["mesh_cache"]:
+            node["mesh"] = ctx["mesh_cache"][cache_key]
+            if skinned:
+                _plan_skin(ctx, node, index, name, bones,
+                           ctx["skin_cache"].get((mesh_file, mesh_id)))
+            continue
+        # One set of vertex accessors per (mesh, skinned): a second material
+        # combination composes a new mesh from the same accessors, which costs
+        # a few bytes of JSON, instead of writing the whole vertex buffer into
+        # the binary a second time.
+        channel_key = (mesh_file, mesh_id, skinned)
+        buffers = ctx["channel_cache"].get(channel_key)
+        if buffers is None:
+            mesh_obj = mesh_record.objects.get(mesh_id)
+            if mesh_obj is None:
+                ctx["report"]["anomalies"].append(
+                    {"type": "mesh-unresolved", "node": name})
+                continue
+            try:
+                mesh_tt = mesh_obj.read_typetree()
+                buffers = _mesh_channels(glb, mesh_obj, mesh_tt, skin=skinned)
+            except Exception:
+                ctx["report"]["anomalies"].append(
+                    {"type": "mesh-unreadable", "node": name, "kind": kind})
+                continue
+            ctx["channel_cache"][channel_key] = buffers
         mesh_index = compose_mesh(glb, buffers, None, materials,
                                   skinned and bool(buffers.get("skin")))
         ctx["mesh_cache"][cache_key] = mesh_index
-        ctx["skin_cache"][mesh_id] = buffers.get("skin")
+        ctx["skin_cache"][(mesh_file, mesh_id)] = buffers.get("skin")
         node["mesh"] = mesh_index
         if skinned:
             _plan_skin(ctx, node, index, name, bones, buffers.get("skin"))
@@ -784,8 +805,9 @@ def _export_package(store, name, out_dir):
               "animations": []}
     ctx = {"fixtureView": set(), "fvRoots": set(), "root": None,
            "variantGoids": set(), "mesh_cache": {}, "material_cache": {},
-           "tex_cache": {}, "skin_cache": {}, "nodeIndex": {},
-           "pendingSkins": [], "tables": [], "table": None, "report": report}
+           "tex_cache": {}, "skin_cache": {}, "channel_cache": {},
+           "nodeIndex": {}, "pendingSkins": [], "tables": [], "table": None,
+           "report": report}
     variants, root_nodes, container = [], [], []
     for record in package.files:
         if not record.kinds:
