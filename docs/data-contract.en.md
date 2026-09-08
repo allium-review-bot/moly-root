@@ -892,6 +892,46 @@ takes that branch, so a foreign path can never stand in for an unresolved local 
 authored data the node tree does not cover and is exported as a component. In the
 sitemap prefab all 92 rows carry all five fields.
 
+### `sitemap/screen_layer/`: the world-map screen's layout truth (player data)
+
+The world map's **screen layer** — where the six site icons hang, how big the
+map ground is, where the weather button and the phenomena panel anchor — is not
+in these 109 packages: the layer is loaded with
+`Resources.Load("Screen/Prefabs/" + layerData.name)`, so its whole tree lives in
+the APK player data's `resources.assets`, an input of the same kind as `ui/`
+(the caller hands over the player-data path). The product is one document,
+`screen_layer.json` (a full RectTransform table for 153 nodes plus the curated
+consumer view). Three **joining laws**, each of which scrambles the map when
+missed:
+
+- **Icons pair with positions by list index**: the root behaviour's
+  `_siteMapIcons` (6 icon behaviours) and `_siteMapIconPositions` (6
+  Transforms) are serialized lists, and the runtime places icon *i* at
+  position *i* before the in-animation — the pairing is by index, never by
+  name. The six pairs: home_site→MyHome (0,-277), grassland→RightRight
+  (724,-230), flower_garden→RightLeft (286,162), shore→LeftRight (-286,162),
+  memorial_place→LeftLeft (-724,-230), festival_garden→Delivery (724,298).
+- **The festival-garden icon is placed a second time**: the runtime moves it
+  onto `_secretSiteMapIconPosition` — which in this prefab points at the same
+  `Delivery` entry of the position list (one object, serialized twice), so the
+  two placements coincide. Whether that duplication is accidental or a
+  deliberate runtime hook is unreadable; it is recorded as it is.
+- **The map ground ships with an empty sprite**: `_siteMapSphereImage` (node
+  `bg_background_image`, 2520×1140 at (0,380)) has a null sprite; the runtime
+  `LoadSprite()` assigns it from the site-map texture set (the assigned
+  texture's native size is exactly 2520×1140, matching the rect), and
+  `_siteMapGroundHighlightImage` is runtime-assigned the same way.
+
+The hand-parsed field chains **carry their own proof**: neither the root
+behaviour nor the icon behaviours ship typetrees, so fields are decoded along
+the managed declaration order (base class first) and a parse that leaves a
+single byte unconsumed aborts. The authored **localScale on each icon
+instance root is truth** (flower_garden/shore 0.9, festival_garden 0.8,
+others 1.0 — the runtime assigns positions only, never scale). Anchor
+semantics are Unity UI: y up, and edge anchors (top-centre / top-left) hang
+off the canvas edge, not the map centre; the canvas reference resolution is
+1920×1080 with the same match law as `ScreenManager.SetUpScreenResolution`.
+
 ## `ui/`
 
 The dialogue windows and the UI sprite atlases take **no downloadable package as

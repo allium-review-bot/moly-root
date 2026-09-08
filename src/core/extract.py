@@ -240,6 +240,7 @@ FIXED_ARTIFACT_PATHS = (
     "ui/talk.json",
     "ui/atlas.json",
     "ui/atlas/textures/",
+    "site/sitemap/screen_layer/screen_layer.json",
     "ui/atlas/sprites/",
 )
 
@@ -418,6 +419,34 @@ def _ui_artifact(out, player_data):
                            "rootClasses": list(UI_WINDOW_ROOT_CLASSES),
                            "windows": windows, "summary": counts})
         entry.update(status="succeeded", error="", counts=counts, path=str(path))
+    except Exception as exc:
+        entry.update(status="failed", error=f"{type(exc).__name__}: {exc}")
+    return entry
+
+
+def _sitemap_screen_layer_artifact(out, player_data):
+    """Build ``site/sitemap/screen_layer/screen_layer.json`` from player data.
+
+    The world-map screen's layout lives in the APK player data (the screen
+    layer is fetched with Resources.Load, not from a bundle), so without the
+    caller-supplied file the artifact is ``skipped`` *with the reason* -- the
+    same distinction the other player-data artifacts keep.
+    """
+    entry = {"artifact": "site/sitemap/screen_layer/screen_layer.json",
+             "domain": "site", "status": "skipped", "counts": {},
+             "error": "no player-data file supplied; the screen-layer layout "
+                      "is built into the APK player data, which is not a "
+                      "downloadable package"}
+    if not player_data:
+        return entry
+    try:
+        from sites.screen_layer import extract_screen_layer
+        if not Path(player_data).exists():
+            raise FileNotFoundError(f"player data not found: {player_data}")
+        result = extract_screen_layer(str(player_data),
+                                      out / "site" / "sitemap" / "screen_layer")
+        entry.update(status="succeeded", error="", counts=result["counts"],
+                     path=result["path"])
     except Exception as exc:
         entry.update(status="failed", error=f"{type(exc).__name__}: {exc}")
     return entry
@@ -1279,7 +1308,8 @@ def extract_manifest(manifest, bundles, out, unity_version=None, master=None,
     # the artifacts derived from the extracted packages.  It is always present:
     # skipped-with-a-reason when no path was supplied, never absent.
     report["playerData"] = [_ui_artifact(out, player_data),
-                            _ui_atlas_artifact(out, player_data)]
+                            _ui_atlas_artifact(out, player_data),
+                            _sitemap_screen_layer_artifact(out, player_data)]
     pack_manifest = write_pack_manifest(out)
     report["derived"].append({
         "artifact": "manifest.json",

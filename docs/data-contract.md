@@ -717,6 +717,16 @@ glb 里的 glTF 材质是**预览近似**，不是翻译，每个取值都来自
 
 `components` 里 **`RectTransform` 与 `Transform` 分开处置**：`Transform` 的 TRS 已在节点树里，照旧跳过；`RectTransform` 的**布局几何**（`m_AnchorMin` / `m_AnchorMax` / `m_AnchoredPosition` / `m_SizeDelta` / `m_Pivot`，全部带 `m_` 前缀）是节点树不覆盖的作者数据，按组件导出。世界地图 prefab 里 92 条全部带全五字段。
 
+### `sitemap/screen_layer/`：世界地图屏的布局真值（player data）
+
+世界地图的**屏幕层**（含小地图六个站点图标的位置、底图尺寸、天气钮与现象面板的锚挂）不在这 109 个包里：屏层的装载走 `Resources.Load("Screen/Prefabs/" + layerData.name)`，整棵树内置在 APK player data 的 `resources.assets`，与 `ui/` 一族同为「调用方传 player data 路径」的输入。落产物一个文档：`screen_layer.json`（153 个节点的 RectTransform 全表 + 消费面 cur）。三条**连接律**，接错了地图就错位：
+
+- **图标与位置按列表下标配对**：根 behaviour 的 `_siteMapIcons`（6 个图标 behaviour）与 `_siteMapIconPositions`（6 个 Transform）是 serialized 列表，运行时把第 i 个图标放到第 i 个位置上再播入场——配对**只认下标**，不认名字。六对：home_site→MyHome (0,-277)、grassland→RightRight (724,-230)、flower_garden→RightLeft (286,162)、shore→LeftRight (-286,162)、memorial_place→LeftLeft (-724,-230)、festival_garden→Delivery (724,298)。
+- **庆典庭院图标还要再搬一次**：运行时把它重新放到 `_secretSiteMapIconPosition`——本 prefab 里这个指针指向的就是位置列表的 `Delivery` 条目（同一对象序列化两次），所以两次放位重合；这是「写重复了」还是「故意留运行时可调」读不出来，原样记账。
+- **底图 sprite 出货为空**：`_siteMapSphereImage`（节点 `bg_background_image`，2520×1140 @ (0,380)）的 sprite 是 null，运行时 `LoadSprite()` 从站点贴图包装（装进来的贴图原生尺寸恰为 2520×1140，与 rect 相符）；`_siteMapGroundHighlightImage` 同为运行时装载。
+
+手解的字段链**以读完整字节为自证**：根 behaviour 与图标 behaviour 都没有 typetree，按托管声明序（基类字段在前）逐字段解，剩一个字节都不行。图标实例根上 **authored 的 localScale 是真值**（flower_garden/shore 0.9、festival_garden 0.8、其余 1.0——运行时只改位置不改缩放）。锚语义照 Unity UI：y 向上，边缘锚（顶中/左上）挂在画布边而不是地图中心；画布参照分辨率 1920×1080，匹配律同 `ScreenManager.SetUpScreenResolution`。
+
 ## `ui/`
 
 对话窗与 UI 精灵图集的输入**不是任何可下载的包**：两者都内置在 APK 的 player data 里，没有包名能指到它们，所以不由路由认领，由调用方传这个文件的路径。没传时报告的 `playerData` 一节照样各带一条，状态 `skipped` 并写明理由——条目缺席会被读成「这个域不存在」，而事实是「没人给它输入」。
