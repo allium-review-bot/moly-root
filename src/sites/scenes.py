@@ -517,6 +517,11 @@ class PackageExtract:
         if entry is None:
             entry = {"node": path}
             self.particles.append(entry)
+        # 连线脸：组件侧的特效槽是按 pathId 指到 ParticleSystem 组件的
+        # PPr。条目带上它，下游才能按指针对上发射器，而不是按节点名
+        # 猜（名字约定只是巧合的形状，指针才是资产里真正存的那条线）。
+        # 只在此处写：renderer 是另一个组件、另一个 pathId，不能覆盖。
+        entry["pathId"] = path_id
         entry["system"] = system
         for gap in gaps:
             self.unsupported.append(dict(gap, node=path))
