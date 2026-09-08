@@ -631,9 +631,10 @@ def extract_manifest(manifest, bundles, out, unity_version=None, master=None,
     *builtin_resources* names the engine's own built-in resource containers (a
     container file, or a directory holding one), resolved with
     :func:`core.assets.packages.builtin_archive_paths` by the caller.  Some
-    particle-system renderers of the fixture/cut-scene family draw a copy of a
-    built-in primitive mesh that no package ships; without this, those mesh
-    slots are reported unresolved rather than left unparsed.
+    particle-system renderers of the fixture/cut-scene family, and some emitters
+    of the phenomena family, draw a copy of a built-in primitive mesh that no
+    package ships; without this, those mesh slots are reported unresolved
+    rather than left unparsed.
 
     *unity_version* is the version to read a bundle whose header carries none
     against.  It is applied here, for the whole run, rather than being left to
@@ -737,10 +738,16 @@ def extract_manifest(manifest, bundles, out, unity_version=None, master=None,
     if phenomena_paths:
         try:
             from phenomena.environments import extract_phenomena
+            # The environment effects draw built-in primitives too: some of
+            # their particle renderers take their mesh from the engine's own
+            # containers, which no package ships -- the same shape the particle
+            # pass below loads ``builtin_resources`` for, so the same resolved
+            # list is handed to this job as extra pointer targets.
             phenomena_result = extract_phenomena(
                 [str(path) for path in phenomena_paths.values()],
                 str(out / "phenomena"), bundle_root=bundles, master=master,
-                master_cache=master_cache, vgmstream=vgmstream, ffmpeg=ffmpeg)
+                master_cache=master_cache, vgmstream=vgmstream, ffmpeg=ffmpeg,
+                extra_archives=builtin_resources)
         except Exception as exc:
             phenomena_error = f"{type(exc).__name__}: {exc}"
     # The site domain is one job over all of its packages too: a room module's

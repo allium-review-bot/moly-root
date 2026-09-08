@@ -114,11 +114,12 @@ def main(argv=None):
     x.add_argument("--builtin-resources", action="append", default=[],
                    metavar="PATH",
                    help="the engine's own built-in resource container, or a "
-                        "directory holding it; some particle-system "
-                        "renderers draw a copy of a built-in primitive mesh "
-                        "and no package ships those. Repeatable. Without it "
-                        "those mesh slots stay listed as unresolved in "
-                        "fixture-particles/, exactly as before")
+                        "directory holding it; some particle-system renderers "
+                        "and some phenomena emitters draw a copy of a "
+                        "built-in primitive mesh and no package ships those. "
+                        "Repeatable. Without it those mesh slots stay listed "
+                        "as unresolved in fixture-particles/ and in the "
+                        "phenomena index, exactly as before")
     x.add_argument("--vgmstream", help="path to the external audio decoder "
                                        "(vgmstream-cli), or the directory holding it")
     x.add_argument("--ffmpeg", help="path to ffmpeg, used only to write a compressed copy of each decoded sound")
