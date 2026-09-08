@@ -198,6 +198,15 @@ def main(argv=None):
     e.add_argument("--bundle", action="append", required=True); e.add_argument("--out-dir", required=True)
     v = sub.add_parser("avatar-parts", help="extract player-appearance packages (skin/decoration/penlight)")
     v.add_argument("--bundle", action="append", required=True); v.add_argument("--out-dir", required=True)
+    pa = sub.add_parser("player-avatar",
+                        help="export the player avatar composite (audience model + skeleton + motion clips) as one glb")
+    pa.add_argument("--bundle", action="append", required=True,
+                    help="the avatar model bundle first, then every motion bundle whose clips "
+                         "are to be resolved against it (the order export_player_avatar takes); "
+                         "repeat --bundle per package")
+    pa.add_argument("--out-dir", required=True)
+    pa.add_argument("--name", default="mysekai__player_avatar",
+                    help="output basename (glb + .index.json + .motion-manifest.json)")
     w = sub.add_parser("phenomena", help="extract weather (phenomena) environment packages")
     w.add_argument("--bundle", action="append", required=True,
                    help="an environment package, or the shared phenomena thumbnail package")
@@ -491,6 +500,18 @@ def main(argv=None):
     if args.cmd == "avatar-parts":
         from chara.avatar_parts import extract_avatar_parts
         print(json.dumps(extract_avatar_parts(args.bundle, args.out_dir), ensure_ascii=False))
+        return 0
+    if args.cmd == "player-avatar":
+        from chara.player_avatar import export_player_avatar, write_motion_manifest
+        record = export_player_avatar(args.bundle, args.out_dir, name=args.name)
+        manifest_path = str(Path(args.out_dir) / f"{args.name}.motion-manifest.json")
+        write_motion_manifest(record, manifest_path)
+        print(json.dumps({
+            "glb": record["glb"], "index": record["index"],
+            "motionManifest": manifest_path,
+            "sourcePackages": record["sourcePackages"],
+            "playerMesh": record["playerMesh"],
+            "counts": record["counts"]}, ensure_ascii=False))
         return 0
     if args.cmd == "phenomena":
         from .assets.packages import builtin_archive_paths

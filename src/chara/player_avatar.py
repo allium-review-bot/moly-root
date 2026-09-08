@@ -40,12 +40,13 @@ import collections
 import io
 import os
 import re
+import struct
 
 import UnityPy
 
 from core.gltf import GLB
 from core.jsonio import write_json
-from core.mesh import compose_mesh, mesh_accessors
+from core.mesh import ARRAY_BUFFER, FLOAT, compose_mesh, mesh_accessors
 from perf.animations import (
     CLASS_GLTF,
     CLASS_NO_BINDING,
@@ -163,6 +164,12 @@ def _clip_frame_info(tree):
 # applied through ``env.container`` instead, mirroring
 # ``avatar_parts._containers``: the instantiated root is the one registered
 # under a path ending ``.prefab``.
+
+#: The body's part index in the true source's combine sequence: the merged
+#: mesh's fragment 0, whose fragment shader slot 0 samples ``_SkinTex`` (the
+#: body slot). The base glb contains this one part only, so every vertex of
+#: the exported body mesh carries it.
+PART_INDEX_BODY = 0
 
 
 def _game_object_names(objects):
@@ -300,11 +307,14 @@ def read_player_mesh(env, glb, hierarchy):
     Returns ``None`` when this bundle carries no ``SkinnedMeshRenderer`` (a
     motion-only bundle) -- callers must not fabricate a skin for it.
     Otherwise ``{"nodePath", "meshIndex", "skinIndex", "joints",
-    "vertexCount", "materialName", "textures"}``: ``nodePath`` is the
-    hierarchy-relative path of the renderer's own node, which the caller
-    resolves through ``hierarchy.node_index()`` -- the caller must not
-    mutate ``glb.g["nodes"]`` until after ``hierarchy.write_scene`` has
-    populated them.
+    "vertexCount", "materialName", "textures", "partIndexChannel"}``:
+    ``nodePath`` is the hierarchy-relative path of the renderer's own node,
+    which the caller resolves through ``hierarchy.node_index()`` -- the
+    caller must not mutate ``glb.g["nodes"]`` until after
+    ``hierarchy.write_scene`` has populated them. ``partIndexChannel``
+    describes the per-vertex part-slot channel written alongside the mesh
+    (see the comment at the write site for why its carrier is the second UV
+    set rather than the true source's UV0.z).
     """
     objects = list(env.objects)
     game_object_names = _game_object_names(objects)
@@ -412,6 +422,30 @@ def read_player_mesh(env, glb, hierarchy):
         # mesh instead.
         raise ValueError("SkinnedMeshRenderer's mesh carries no bind pose "
                          "(m_BindPose empty or no bone indices)")
+
+    # part-index 通道（真源 CombineMesh 语义）：真源合并网格把 part 序号烘进
+    # 顶点 UV0 的 z 分量，片元按 int(in_TEXCOORD0.z) 分派贴图槽
+    # （0=_SkinTex 身体 · 1=_AccessoryTex · 2,4=_PenlightBody ·
+    # 3,5=_PenlightLight，其余落默认白）。值律照搬：逐顶点 part 槽号；基座
+    # glb 只含身体这一个 part，故全部顶点 = PART_INDEX_BODY（身体槽），这是
+    # 真源单 part 的语义，不是占位。
+    # ⛔ 变的只是载体：这里烘成第二套 UV（TEXCOORD_1）的 x 分量、y 恒 0，
+    # 不是 UV0.z——消费端装载器（Bevy 0.18.1）的两套 UV 顶点属性都是
+    # Float32x2，3 分量 UV 一律格式不符被整个丢弃（UV0 若升 3 分量，uv
+    # 本身也一起丢），第二套 UV 的 x 是唯一既装载得进、又载得了值的形状
+    # （装载后即 mesh 的 UV_1，顶点着色器侧读作 vertex.uv_b）。不要顺手
+    # 「修回」UV0.z：值律没有变，改回去只会让通道整个消失、消费端断言
+    # 响亮拒绝。
+    if "TEXCOORD_1" in buffers["attributes"]:
+        raise ValueError(
+            "the body mesh carries its own UV1 stream; the part-index "
+            "channel would collide with it -- refusing rather than "
+            "overwriting a real second UV set")
+    buffers["attributes"]["TEXCOORD_1"] = glb.acc(
+        b"".join(struct.pack("<2f", float(PART_INDEX_BODY), 0.0)
+                 for _ in range(buffers["vertices"])),
+        FLOAT, "VEC2", buffers["vertices"], ARRAY_BUFFER)
+
     mesh_index = compose_mesh(glb, buffers, name=mesh_tree.get("m_Name"),
                               materials={0: material_index}, skinned=True)
 
@@ -449,7 +483,16 @@ def read_player_mesh(env, glb, hierarchy):
     return {"nodePath": node_rel_path, "meshIndex": mesh_index,
             "skinIndex": skin_index, "joints": joints,
             "vertexCount": buffers["vertices"],
-            "materialName": entry["name"], "textures": sorted(texture_index)}
+            "materialName": entry["name"], "textures": sorted(texture_index),
+            "partIndexChannel": {"attribute": "TEXCOORD_1", "type": "VEC2",
+                                 "x": "part index", "y": 0.0,
+                                 "partIndex": PART_INDEX_BODY,
+                                 "carrierBasis": (
+                                     "true source bakes the part index into "
+                                     "UV0.z; this export carries it in "
+                                     "TEXCOORD_1.x because the consumer's "
+                                     "glTF loader drops 3-component UV "
+                                     "attributes outright")}}
 
 
 def _scene_roots(hierarchy, root_indexes, body_mesh):
@@ -667,7 +710,8 @@ def export_player_avatar(bundle_paths, out_dir, name="mysekai__player_avatar"):
                        "vertexCount": body_mesh["vertexCount"],
                        "joints": len(body_mesh["joints"]),
                        "materialName": body_mesh["materialName"],
-                       "textures": body_mesh["textures"]}
+                       "textures": body_mesh["textures"],
+                       "partIndexChannel": body_mesh["partIndexChannel"]}
                       if body_mesh is not None else None),
         "clips": {c["name"]: c["channels"] for c in clips},
         "clipRecords": clips,
