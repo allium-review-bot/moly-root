@@ -208,8 +208,10 @@ def main(argv=None):
                             "named by talks.json, plus the remaining se, bgm "
                             "and part-voice packages")
     a.add_argument("--talks", required=True,
-                   help="talks.json, whose voice cues are the talk-voice "
-                        "denominator; only those cues are decoded")
+                   help="a talk corpus in either shape this repo's extractors "
+                        "write (talks grouped under units, or a flat talks "
+                        "list); its voice cues are the talk-voice denominator, "
+                        "and only those cues are decoded")
     a.add_argument("--manifest", required=True,
                    help="asset bundle manifest giving the family denominators")
     a.add_argument("--bundle-root", required=True,

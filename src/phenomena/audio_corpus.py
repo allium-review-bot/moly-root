@@ -26,10 +26,13 @@ not to a cue list.
 
 Output lands in the same ``audio/`` library the phenomena job writes, in the
 same per-package shape, and the loop sidecar is merged: packages already on
-disk keep their entries, new ones are appended.  The coverage document written
-alongside carries the denominators per family — requested against the manifest,
-succeeded, and the named remainder — so a consumer can tell "never asked" from
-"asked and missing".
+disk keep their entries, new ones are appended.  The corpus ledger written
+alongside accumulates the same way — counts add up across runs, named gaps
+merge by name, and a family a run asked nothing about keeps its previous
+summary — so a consumer can tell "never asked" from "asked and missing" over
+everything on disk, not just the last run.  A talk corpus arrives in either of
+the two shapes the repo's talk extractors write, talks grouped under ``units``
+or a flat ``talks`` list, and both name voice cues the same way.
 """
 import json
 from pathlib import Path
@@ -67,10 +70,19 @@ SEMANTICS = {
     "uncovered": ("cues whose talk script has no package in the manifest: a "
                   "data gap to fix upstream, named rather than swallowed"),
     "partVoiceCues": ("the talk corpus also names part-voice cues; this is "
-                      "whether the decoded packages answer them, as a check "
-                      "only — the packages themselves are extracted whole"),
+                      "whether the part-voice packages on disk answer them, "
+                      "as a check only — the packages themselves are "
+                      "extracted whole, and the unanswered names accumulate "
+                      "across runs"),
     "loop": ("the loop sidecar is shared with the phenomena job: existing "
              "entries keep their places, this job's are appended"),
+    "corpus": ("the corpus ledger accumulates across runs the way the loop "
+               "sidecar does: a family this run asked nothing about keeps its "
+               "previous summary, a family it did ask for adds this run's "
+               "counts to the previous ones and merges its named entries by "
+               "name with this run's reading winning, and the part-voice "
+               "check keeps every unanswered name any run has found — the "
+               "ledger describes the corpus on disk, not the last run"),
     "inPackage": ("counts taken from the archives' own reports; a stream "
                   "without a `wav` path failed to decode and says why"),
 }
@@ -83,6 +95,15 @@ def voice_stem(cue):
     return body.rsplit("_", 2)[0]
 
 
+def _corpus_talks(document):
+    """Every talk entry of a corpus, whichever of the two shapes the repo's
+    talk extractors write: talks grouped under ``units`` by character, or a
+    flat ``talks`` list (the fixture corpus)."""
+    for unit in (document.get("units") or {}).values():
+        yield from unit.get("talks") or []
+    yield from document.get("talks") or []
+
+
 def voice_requests(document):
     """Voice cues of a talk corpus, grouped into package requests.
 
@@ -90,11 +111,10 @@ def voice_requests(document):
     sorted cues asked of it, and the sorted set of cues themselves.
     """
     cues = set()
-    for unit in (document.get("units") or {}).values():
-        for talk in unit.get("talks") or []:
-            for cue in talk.get("voices") or []:
-                if cue.startswith(CUE_PREFIX):
-                    cues.add(cue)
+    for talk in _corpus_talks(document):
+        for cue in talk.get("voices") or []:
+            if cue.startswith(CUE_PREFIX):
+                cues.add(cue)
     requests = {}
     for cue in sorted(cues):
         requests.setdefault(TALK_VOICE + voice_stem(cue), []).append(cue)
@@ -166,6 +186,77 @@ def _merge_loop(audio_root, library):
     return document
 
 
+# Count fields of a family summary that accumulate across runs.  `requested`
+# and `requestedCues` re-count a corpus that is run again; `succeeded` and
+# `decodedCues` do not, because a package already on disk is never re-decoded.
+COUNTS = ("requested", "succeeded", "requestedCues", "decodedCues")
+
+
+def _merge_by_name(prior, current, key):
+    """Two named-entry lists as one sorted list; this run's reading of a
+    name wins."""
+    merged = {entry.get(key): entry for entry in prior}
+    merged.update({entry.get(key): entry for entry in current})
+    return [merged[name] for name in sorted(merged)]
+
+
+def _family_asked(family):
+    """Whether the run asked anything of this family."""
+    return bool(family.get("requested") or family.get("requestedCues")
+                or family.get("failed") or family.get("missingPackages"))
+
+
+def _merge_family(prior, current):
+    """A family summary as an accumulating account: the count fields add up
+    across runs, the named remainders merge by name."""
+    merged = dict(current)
+    for field in COUNTS:
+        if isinstance(prior.get(field), int) and isinstance(current.get(field), int):
+            merged[field] = prior[field] + current[field]
+    for field, name in (("failed", "package"), ("missingPackages", "package"),
+                        ("uncovered", "cue")):
+        if field in prior or field in current:
+            merged[field] = _merge_by_name(prior.get(field) or [],
+                                           current.get(field) or [], name)
+    return merged
+
+
+def _merge_part_voice(prior, current):
+    """The part-voice check as an accumulating account: the counts describe
+    the latest corpus, the unanswered names accumulate across runs."""
+    if not current.get("requested") and not current.get("missing"):
+        return dict(prior)          # this corpus names no part-voice cues
+    merged = dict(current)
+    merged["missing"] = sorted(set(prior.get("missing") or [])
+                               | set(current.get("missing") or []))
+    return merged
+
+
+def _merge_corpus(path, document):
+    """Fold this run's account into the corpus ledger already on disk.
+
+    A family this run asked nothing about keeps its previous summary; a
+    family it did ask for adds this run's counts and merges its named
+    entries by name.  The part-voice check keeps every unanswered name any
+    run has found.
+    """
+    prior = json.loads(path.read_text(encoding="utf-8"))
+    merged = dict(document)
+    families = dict(document["families"])
+    for name, family in families.items():
+        old = (prior.get("families") or {}).get(name)
+        if old is None:
+            continue
+        families[name] = (old if not _family_asked(family)
+                          else _merge_family(old, family))
+    merged["families"] = families
+    old_parts = prior.get("partVoiceCues")
+    if old_parts is not None:
+        merged["partVoiceCues"] = _merge_part_voice(old_parts,
+                                                    document["partVoiceCues"])
+    return merged
+
+
 def extract_audio_corpus(talks_path, manifest_path, bundle_root, out_dir,
                          decoder=None, transcoder=None, skip_existing=True):
     """Extract the sound families the phenomena job does not ask for.
@@ -235,14 +326,16 @@ def extract_audio_corpus(talks_path, manifest_path, bundle_root, out_dir,
         {"cue": cue, "reason": NO_PACKAGE} for cue in voice_cues
         if TALK_VOICE + voice_stem(cue) not in manifest_set]
 
-    # The corpus also names part-voice cues; whether the whole-family packages
-    # answer them is a consumer-side check, not part of any denominator.
+    loop = _merge_loop(audio_root, library)
+
+    # The corpus also names part-voice cues; whether the packages answer them
+    # is a consumer-side check, not part of any denominator.  It reads the
+    # merged library, so streams a previous run decoded count as answered.
     part_cues = sorted(
-        {cue for unit in (talks.get("units") or {}).values()
-         for talk in unit.get("talks") or []
+        {cue for talk in _corpus_talks(talks)
          for cue in talk.get("voices") or []
          if cue.startswith("partvoice_")})
-    answered = {stream.get("cue") for entry in library.packages
+    answered = {stream.get("cue") for entry in loop["packages"]
                 if entry["package"].startswith(PART_VOICE.replace("/", "__"))
                 for stream in entry["streams"] if stream.get("wav")}
     part_voice_cues = {"requested": len(part_cues),
@@ -250,12 +343,13 @@ def extract_audio_corpus(talks_path, manifest_path, bundle_root, out_dir,
                        "missing": [cue for cue in part_cues
                                    if cue not in answered]}
 
-    loop = _merge_loop(audio_root, library)
     document = {"version": 1, "semantics": SEMANTICS, "families": families,
                 "partVoiceCues": part_voice_cues,
                 "loop": {"file": "audio/loop.json",
                          "packages": len(loop["packages"])}}
     path = audio_root / "corpus.json"
+    if path.exists():
+        document = _merge_corpus(path, document)
     path.write_text(dumps(document) + "\n", encoding="utf-8", newline="\n")
     document["path"] = str(path)
     document["audio"] = loop

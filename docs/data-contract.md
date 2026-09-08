@@ -565,7 +565,7 @@ layer = min(layers - 1, max(0, floor(fract(clamp(progressSource + progress, 0, 0
 
 | 族 | 分母 | 口径 |
 |---|---|---|
-| talk voice | `talks.json` 的 `voice_` cue | **按 cue 点名，不按包盲提**。cue → 去掉 `voice_` 前缀、再去掉结尾的行/变体一对 → 该对话脚本自己的包 `mysekai/talk/voice/<脚本名>`；只解码语料点名的 cue，一包之内语料没用到的 cue 留着不解。 |
+| talk voice | 语料的 `voice_` cue（`--talks` 收本仓 talk 提取器写出的两种语料形：按 `units` 分组的角色对话语料，与平铺 `talks` 列表的家具对话语料） | **按 cue 点名，不按包盲提**。cue → 去掉 `voice_` 前缀、再去掉结尾的行/变体一对 → 该对话脚本自己的包 `mysekai/talk/voice/<脚本名>`；只解码语料点名的 cue，一包之内语料没用到的 cue 留着不解。 |
 | se（家具音效） | manifest 的 `mysekai/sound/se/` 全族，减去已在盘的共享环境音包 | 整包全解。 |
 | bgm 余量 | manifest 的 `mysekai/sound/bgm/` 全族，减去已在盘 | 整包全解：jukebox 曲库（music0001–16）、教程曲与站点曲变体——现象任务的 master 行不点名这些。 |
 | part_voice | manifest 的 `mysekai/talk/part_voice/` 全族 | 整包全解。piapro 型角色专属；装载按 UnitType 门控，人类角色没有包是真源构造，不是缺口。 |
@@ -573,9 +573,9 @@ layer = min(layers - 1, max(0, floor(fract(clamp(progressSource + progress, 0, 0
 要点：
 
 - **`loop.json` 是合并文档**：现象任务写的条目原样保留，本命令的条目追加（同包名则以新替旧）。`index.json` 的 `audio` 字段仍是现象任务自己那一片——**要全量音频读 `loop.json`，不要读 `index.json`**。
-- **语料点不到的包不提**：talk voice 家族在 manifest 里有 3995 包，`talks.json` 只点名其中一部分；fixture-talks 语料的 voice cue 是另一个消费面，不在本命令的分母里。
+- **语料点不到的包不提**：talk voice 家族在 manifest 里有 3995 包，一份语料只点名其中一部分；`--talks` 换一份语料即可点名另一个消费面，已在盘上的包不重复解码。
 - **cue 在包里没有对应波形、或脚本名根本没有包**，都逐条具名写进 `audio/corpus.json`（`families.talk-voice.uncovered` 与 `missingPackages`）——这是上游数据缺口，不是提取失败，命令照常完成。
-- `corpus.json` 是本次提取的账：逐族 `requested` / `succeeded` / `failed`（分母与具名理由）、talk voice 的 cue 级覆盖、part_voice 包对语料 `partvoice_` cue 的应答情况。与 `loop.json` 同规：**只写工具名与文件名，不写本机目录**。
+- `corpus.json` 是**累积账本**，并账语义与 `loop.json` 对齐：本次跑的计数累加进既有账，具名条目（failed / 缺包包名 / uncovered cue）按名合并（本次的读数胜出），本次分母没问的族整段保留原账——账本描述盘上语料的现状，而非最后一次跑。重跑同一份语料会把它的 `requested` / `requestedCues` 再累加一次（`succeeded` / `decodedCues` 不会：盘上已有就不重复解码）。逐族 `requested` / `succeeded` / `failed`、talk voice 的 cue 级覆盖、part_voice 包对语料 `partvoice_` cue 的应答（`requested` / `answered` 记最近一份语料，`missing` 是历次跑发现的无应答具名累积，应答按盘上全部 part_voice 流现算）。与 `loop.json` 同规：**只写工具名与文件名，不写本机目录**。
 - 波形、循环点、解码器缺席的三态语义与现象任务完全一致（见上一节）。
 
 ## 家具几何与内嵌动画（`fixture-models/`）

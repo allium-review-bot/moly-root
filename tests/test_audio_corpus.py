@@ -36,6 +36,20 @@ TALKS = {
     },
 }
 
+# The other corpus shape the repo's talk extractors write: a flat talks list,
+# voices carried by each talk entry itself.
+FLAT_TALKS = {
+    "talks": [
+        {"lua": "mysekai_talk_alpha_001", "voices": [
+            "voice_mysekai_talk_alpha_001_01_001",
+            "partvoice_01_021_idol",
+        ]},
+        {"lua": "mysekai_talk_delta_002", "voices": [
+            "voice_mysekai_talk_delta_002_05_001",
+        ]},
+    ],
+}
+
 MANIFEST = {
     "bundles": {
         name: {} for name in [
@@ -61,6 +75,8 @@ STREAM_NAMES = {
         "voice_mysekai_talk_beta_001_01_001",
     "mysekai__talk__voice__mysekai_talk_gamma_001_02":
         "voice_mysekai_talk_gamma_001_02_03_001",
+    "mysekai__talk__voice__mysekai_talk_delta_002":
+        "voice_mysekai_talk_delta_002_05_001",
     "mysekai__sound__se__fixture__basketball": "se_bounce",
     "mysekai__sound__bgm__music0001": "music0001",
     "mysekai__talk__part_voice__mysekai_part_voice_v2_21miku_idol":
@@ -92,6 +108,20 @@ def test_voice_requests_group_by_script_and_skip_other_prefixes():
         ],
     }
     assert len(cues) == 4            # the partvoice cue is not a voice_ cue
+
+
+def test_voice_requests_reads_the_flat_corpus_shape():
+    requests, cues = audio_corpus.voice_requests(FLAT_TALKS)
+    assert requests == {
+        "mysekai/talk/voice/mysekai_talk_alpha_001": [
+            "voice_mysekai_talk_alpha_001_01_001",
+        ],
+        "mysekai/talk/voice/mysekai_talk_delta_002": [
+            "voice_mysekai_talk_delta_002_05_001",
+        ],
+    }
+    assert cues == ["voice_mysekai_talk_alpha_001_01_001",
+                    "voice_mysekai_talk_delta_002_05_001"]
 
 
 def test_prefix_packages_selects_a_family_and_excludes_existing():
@@ -263,6 +293,62 @@ def test_corpus_names_a_missing_script_instead_of_failing(tmp_path,
         "reason": audio_corpus.NO_PACKAGE,
     }]
     assert family["decodedCues"] == 3
+
+
+def test_corpus_ledger_accumulates_across_runs(tmp_path, monkeypatch,
+                                               decoder, corpus_inputs):
+    talks, manifest, out = corpus_inputs
+    # One script the manifest does not list, so the first run leaves a named
+    # gap behind, and one more for the second run to ask for.
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    del document["bundles"]["mysekai/talk/voice/mysekai_talk_beta_001"]
+    document["bundles"]["mysekai/talk/voice/mysekai_talk_delta_002"] = {}
+    manifest.write_text(json.dumps(document), encoding="utf-8", newline="\n")
+    monkeypatch.setattr("core.assets.packages.PackageStore", _FakeStore)
+
+    audio_corpus.extract_audio_corpus(
+        talks, manifest, str(tmp_path / "bundles"), out, decoder=decoder)
+
+    flat = tmp_path / "fixture-talks.json"
+    flat.write_text(json.dumps(FLAT_TALKS), encoding="utf-8", newline="\n")
+    report = audio_corpus.extract_audio_corpus(
+        flat, manifest, str(tmp_path / "bundles"), out, decoder=decoder)
+
+    family = report["families"]["talk-voice"]
+    # counts accumulate: 3 requested by the first corpus, 1 more (delta) by
+    # the second; alpha's package is on disk already and is not asked again.
+    assert family["requested"] == 4
+    assert family["succeeded"] == 3          # 2 + 1: beta stays a named gap
+    assert family["requestedCues"] == 6      # 4 + 2
+    assert family["decodedCues"] == 4        # 3 + 1: alpha's cue stays decoded
+    # the first run's named gap survives the second run's account
+    assert [entry["package"] for entry in family["missingPackages"]] == \
+        ["mysekai__talk__voice__mysekai_talk_beta_001"]
+    assert [entry["cue"] for entry in family["uncovered"]] == \
+        ["voice_mysekai_talk_beta_001_01_001"]
+    # families the second corpus asked nothing about keep the first summary
+    assert report["families"]["se"] == {"requested": 1, "succeeded": 1,
+                                        "failed": []}
+    assert report["families"]["part-voice"]["requested"] == 1
+    # bgm's beach package is not in the decrypted tree: the first run named
+    # the failure, the second asked for it again — counts add up, the named
+    # failure merges by package into one entry
+    assert report["families"]["bgm"] == {
+        "requested": 3, "succeeded": 1,
+        "failed": [{"package": "mysekai__sound__bgm__bgm_mysekai_beach",
+                    "reason": audio_corpus.NO_BUNDLE}],
+    }
+    # the part-voice check reads the merged library: the part-voice package
+    # the first run extracted answers the second corpus's cue, and the name
+    # the first run found unanswered stays on the books
+    assert report["partVoiceCues"] == {"requested": 1, "answered": 1,
+                                       "missing": ["partvoice_01_021_band"]}
+
+    audio = out / "audio"
+    corpus = json.loads((audio / "corpus.json").read_text(encoding="utf-8"))
+    # the shipped ledger is the accumulated one the report describes
+    assert corpus["families"] == report["families"]
+    assert corpus["partVoiceCues"] == report["partVoiceCues"]
 
 
 def test_loop_merge_replaces_and_keeps_order(tmp_path):
