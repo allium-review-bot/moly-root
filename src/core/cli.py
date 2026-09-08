@@ -146,6 +146,9 @@ def main(argv=None):
                     help="base URL to append <table>.json to; no value uses the public default base")
     k.add_argument("--master-cache", help="where fetched tables are cached")
     k.add_argument("--bundle", required=True, help="talk scenario bundle")
+    k.add_argument("--lib", help="decrypted lib package carrying the constant "
+                                 "tables the scripts name; without it every "
+                                 "Table.key token stays a source token")
     k.add_argument("--out", required=True)
 
     tw = sub.add_parser("tweets", help="extract tweet texts and per-character after-edit pools")
@@ -365,7 +368,8 @@ def main(argv=None):
         from chara.talks import extract_talks
         source, cache = _master_source(args)
         print(json.dumps(extract_talks(source, args.bundle, args.out,
-                                       master_cache=cache), ensure_ascii=False))
+                                       master_cache=cache,
+                                       lib_bundle=args.lib), ensure_ascii=False))
         return 0
 
     if args.cmd == "tweets":
