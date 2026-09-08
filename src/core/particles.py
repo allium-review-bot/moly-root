@@ -417,6 +417,15 @@ def decode_system(tree, resolve_node=None):
     if rotation.get("enabled"):
         out["rotationOverLifetime"] = {"separateAxes": bool(rotation.get("separateAxes")),
                                        "curve": min_max_curve(rotation.get("curve", {}))}
+        if rotation.get("separateAxes"):
+            # `curve` is the z axis: the engine's rotation-module editor binds
+            # its z field to the serialized name `curve`, while the size module
+            # is the mirror image (there `curve` is x and y/z are the extras).
+            # x/y exist as authored curves only in separate-axes mode, and an
+            # all-zero pair is authored data, not a default -- it exports as
+            # zero curves, exactly as authored.
+            out["rotationOverLifetime"]["x"] = min_max_curve(rotation.get("x", {}))
+            out["rotationOverLifetime"]["y"] = min_max_curve(rotation.get("y", {}))
 
     velocity = tree.get("VelocityModule", {})
     if velocity.get("enabled"):
