@@ -254,6 +254,20 @@ def main(argv=None):
     r.add_argument("--out-dir", required=True,
                    help="the phenomena output directory whose audio/ receives "
                         "partvoice.json")
+    u = sub.add_parser("ui-action-icons",
+                       help="export the standalone action-button icon bundles "
+                            "as one PNG per bundle plus a manifest")
+    u.add_argument("--bundle", action="append", required=True,
+                   help="an action-icon bundle; repeat for as many as wanted")
+    u.add_argument("--out-dir", required=True)
+    f = sub.add_parser("fixture-master-slice",
+                       help="slice mysekaiFixtures down to the columns the "
+                            "runtime reads (button gating and footprint)")
+    f.add_argument("--master", help="directory of caller-supplied master tables")
+    f.add_argument("--master-url", nargs="?", const="", default=None,
+                   help="base URL to append <table>.json to; no value uses the public default base")
+    f.add_argument("--master-cache", help="where fetched tables are cached")
+    f.add_argument("--out", required=True)
     q = sub.add_parser("site", help="extract the site (place) asset packages")
     q.add_argument("--bundle", action="append", required=True,
                    help="a package under the site path; repeat for as many as wanted")
@@ -431,6 +445,22 @@ def main(argv=None):
                      "pass --master <dir> or --master-url")
         from sites.site_groups import extract_site_groups
         print(json.dumps(extract_site_groups(source, args.out, master_cache=cache),
+                         ensure_ascii=False))
+        return 0
+
+    if args.cmd == "ui-action-icons":
+        from ui.action_icon import export_action_icons
+        print(json.dumps(export_action_icons(args.bundle, args.out_dir),
+                         ensure_ascii=False))
+        return 0
+
+    if args.cmd == "fixture-master-slice":
+        source, cache = _master_source(args)
+        if not source:
+            ap.error("fixture-master-slice needs master tables: "
+                     "pass --master <dir> or --master-url")
+        from fixtures.master_slice import export_fixture_master_slice
+        print(json.dumps(export_fixture_master_slice(source, args.out, master_cache=cache),
                          ensure_ascii=False))
         return 0
 
