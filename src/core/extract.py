@@ -458,9 +458,9 @@ def _ui_atlas_artifact(out, player_data):
     Like the dialogue-UI artifact, the sprite atlases live in the APK's player
     data and in no downloadable package, so the input path has to come from the
     caller and without it the artifact is ``skipped`` *with the reason* rather
-    than left out.  The atlas texture images are large, so only the atlases the
-    order names are decoded; every atlas is inventoried regardless, and the
-    counts carry how many sprite rectangles matched their authored sizes.
+    than left out.  Every atlas is decoded and inventoried, and the counts
+    carry how many sprite rectangles matched the packed rect the sprite
+    itself records, plus how many were trimmed by tight packing.
     """
     entry = {"artifact": "ui/atlas.json", "domain": "ui", "status": "skipped",
              "counts": {},
