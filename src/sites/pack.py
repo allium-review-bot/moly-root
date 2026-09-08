@@ -78,7 +78,12 @@ SEMANTICS = dict(PLACEMENT_SEMANTICS, **{
                   "property block is the record"),
     "inactiveNodes": ("nodes that ship hidden. They are kept in the geometry, because "
                       "the pack is the authored scene, and listed so a consumer does "
-                      "not draw what the game never shows"),
+                      "not draw what the game never shows. Each path is relative to "
+                      "the prefab root of its own walk, the root's name is not part "
+                      "of the path, and the list covers every walk of the package: "
+                      "a package's asset prefabs carry hidden nodes of their own, so "
+                      "a consumer that spawns only the default scene will meet paths "
+                      "it never placed -- that is the convention, not a mismatch"),
     "skins": ("a skinned renderer's joint binding: which glTF nodes drive the mesh, "
               "in the mesh's own bind-pose order, with the vertex influences and "
               "inverse bind matrices written into the binary. One entry per "
@@ -317,6 +322,14 @@ def extract_sites(bundles, out_dir, bundle_root=None, master=None, master_cache=
                 "packages": {document["package"]: {
                     "kind": document["kind"], "key": document["key"],
                     "directory": f"{DIRECTORIES[document['kind']]}/{_stem(document['key'])}",
+                    # The document path is stated rather than derived: the
+                    # directory's stem and the document's stem are two different
+                    # functions (the one kit package is `indoor/kit` but
+                    # `indoor/kit/common.json`), so a `<directory>/<leaf>.json`
+                    # convention cannot reach it.
+                    "document": document.get("file") or
+                        f"{DIRECTORIES[document['kind']]}/{_stem(document['key'])}"
+                        f"/{document['key'].rsplit('__', 1)[-1]}.json",
                     "inventory": document.get("inventory"),
                     "objects": document.get("objects"),
                     "artifacts": {

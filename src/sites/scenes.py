@@ -237,11 +237,16 @@ class PackageExtract:
         return sorted(set(self._container.get((record.archive, path_id), [])))
 
     # -- node walk --------------------------------------------------------
-    def _component(self, record, graph, transform, path, node_paths, root=None):
+    def _component(self, record, graph, transform, path, node_paths, scene,
+                   root=None):
         """Read every component of one node; returns the glTF mesh index or None."""
         components = graph.components(transform)
         kinds = {kind for kind, _ in components}
         mesh_index = None
+        # This node's emitter entry, created by whichever particle component
+        # arrives first and shared by both, so a node's system and its own
+        # renderer land in one entry whatever the component order is.
+        particle = None
         for kind, path_id in components:
             if kind is None:
                 self.unsupported.append({"node": path, "component": None,
@@ -265,10 +270,12 @@ class PackageExtract:
                                visible="MeshRenderer" in kinds, root=root)
                 continue
             if kind == "ParticleSystem":
-                self._particle_system(record, path_id, path, node_paths, graph)
+                particle = self._particle_system(record, path_id, path, node_paths,
+                                                 graph, scene, particle)
                 continue
             if kind == "ParticleSystemRenderer":
-                self._particle_renderer(record, path_id, path)
+                particle = self._particle_renderer(record, path_id, path, scene,
+                                                   particle)
                 continue
             if kind == "NavMeshData":
                 self._navmesh(record, path_id, path)
@@ -367,6 +374,11 @@ class PackageExtract:
                  "meshes": 0, "renderers": 0, "vertices": 0, "triangles": 0,
                  "skins": 0,
                  "assets": self.asset_paths(record, graph.owner[transform])}
+        # The scene this walk writes is appended, in walk order, once the walk
+        # is done -- so its index is the number of scenes written so far, and
+        # every emitter entry the walk exports carries that index as its walk
+        # anchor (see _particle_node).
+        scene = len(self.builder.glb.g["scenes"])
         for current in graph.subtree(transform):
             game_object = graph.owner[current]
             path = node_paths.get(game_object, "")
@@ -400,7 +412,7 @@ class PackageExtract:
                 self.builder.glb.g["nodes"][parent := indices[parent]] \
                     .setdefault("children", []).append(index)
             entry["nodes"] += 1
-            self._component(record, graph, current, path, node_paths,
+            self._component(record, graph, current, path, node_paths, scene,
                             root=entry["name"])
         entry["skins"] = self._bind_skins(pending, indices, entry["name"])
         scene = self.builder.scene(entry["name"], indices[transform])
@@ -497,7 +509,30 @@ class PackageExtract:
         self._mark(record, path_id, "exported", "collision surface")
         return dict(reference)
 
-    def _particle_system(self, record, path_id, path, node_paths, graph):
+    def _particle_node(self, scene, path, entry):
+        """The emitter entry of one node of one walk; ``None`` makes it first.
+
+        An entry is written per node, not per path: the same node path occurs
+        once per prefab root, because a package's asset prefabs repeat each
+        other's internal structure (`root/flash` and friends), and a walk can
+        even hold two same-named siblings -- the memorial dig effect and the
+        dewdrop plants each ship a pair.  Keying by the bare path merged
+        all of those into one entry and the last writer won, so whole walks'
+        emitter parameters were dropped; a (walk, path) key alone still merges
+        the siblings.  One entry per node keeps every emitter the package
+        ships, and each carries its walk's *scene index* as the anchor: root
+        names repeat across walks (nineteen of them twice in the festival
+        scene alone), while every walk appends exactly one scene, in walk
+        order, so the index is the walk's unambiguous id and joins
+        ``roots[].scene``.
+        """
+        if entry is None:
+            entry = {"scene": scene, "node": path}
+            self.particles.append(entry)
+        return entry
+
+    def _particle_system(self, record, path_id, path, node_paths, graph, scene,
+                         entry=None):
         def resolve(pointer):
             pointer = pointer or {}
             if pointer.get("m_FileID", 0):
@@ -512,11 +547,8 @@ class PackageExtract:
             self.unsupported.append({"node": path, "component": "ParticleSystem",
                                      "reason": f"{type(exc).__name__}: {exc}"})
             self._mark(record, path_id, "unsupported", UNREADABLE)
-            return
-        entry = next((e for e in self.particles if e["node"] == path), None)
-        if entry is None:
-            entry = {"node": path}
-            self.particles.append(entry)
+            return entry
+        entry = self._particle_node(scene, path, entry)
         # 连线脸：组件侧的特效槽是按 pathId 指到 ParticleSystem 组件的
         # PPr。条目带上它，下游才能按指针对上发射器，而不是按节点名
         # 猜（名字约定只是巧合的形状，指针才是资产里真正存的那条线）。
@@ -526,18 +558,16 @@ class PackageExtract:
         for gap in gaps:
             self.unsupported.append(dict(gap, node=path))
         self._mark(record, path_id, "exported", "emitter")
+        return entry
 
-    def _particle_renderer(self, record, path_id, path):
+    def _particle_renderer(self, record, path_id, path, scene, entry=None):
         tree = record.tree(path_id)
         slots = len(tree.get("m_Materials") or [])
         material = self.builder.material(record, (tree.get("m_Materials") or [None])[0]
                                          if slots else None)[1]
         trail = (self.builder.material(record, tree["m_Materials"][TRAIL_MATERIAL_SLOT])[1]
                  if slots > TRAIL_MATERIAL_SLOT else None)
-        entry = next((e for e in self.particles if e["node"] == path), None)
-        if entry is None:
-            entry = {"node": path}
-            self.particles.append(entry)
+        entry = self._particle_node(scene, path, entry)
         entry["renderer"] = decode_renderer(tree, material, trail)
         if entry["renderer"]["renderMode"] == MESH_RENDER_MODE:
             index, reason = self.builder.mesh(record, tree.get("m_Mesh") or {})
@@ -548,6 +578,7 @@ class PackageExtract:
                                          "component": "ParticleSystemRenderer",
                                          "reason": reason})
         self._mark(record, path_id, "exported", "emitter renderer")
+        return entry
 
     def _navmesh(self, record, path_id, node=None):
         tree = record.tree(path_id)
