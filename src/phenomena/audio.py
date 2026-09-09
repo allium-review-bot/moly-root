@@ -189,7 +189,16 @@ class Library:
         return entry
 
     def finish(self):
-        """Write the loop sidecar and return the index-level audio document."""
+        """Write the loop sidecar and return the index-level audio document.
+
+        The write is a wholesale replacement, not a merge: the file on disk
+        becomes exactly this run's package list.  Merging with what a previous
+        run wrote lives on the corpus side (``audio_corpus._merge_loop``),
+        which is also what the corpus's resume reads as its skip roster — so
+        re-running the phenomena job in place over a directory the corpus
+        already wrote replaces that roster whole, and the next corpus run
+        re-decodes every package the phenomena run did not carry.
+        """
         # Only tool names, never the paths they were found at: this document ships
         # next to the audio and would otherwise carry one machine's directory layout.
         document = {"status": self.status, "decoder": DECODER,

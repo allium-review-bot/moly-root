@@ -1798,12 +1798,16 @@ def test_the_command_line_asks_for_the_container_and_never_assumes_one(tmp_path,
         return {"perBundle": {}, "meshes": 0}
 
     monkeypatch.setattr(environments, "extract_phenomena", fake)
-    assert cli.main(["phenomena", "--bundle", "package", "--out-dir",
+    # --bundle takes a path that exists: the entrance refuses a bare package
+    # name, which the loader would otherwise read as an empty environment.
+    bundle = tmp_path / "package"
+    bundle.write_bytes(b"")
+    assert cli.main(["phenomena", "--bundle", str(bundle), "--out-dir",
                      str(tmp_path)]) == 0
     assert seen["extra_archives"] == []
     container = tmp_path / "unity default resources"
     container.write_bytes(b"")
-    assert cli.main(["phenomena", "--bundle", "package", "--out-dir", str(tmp_path),
+    assert cli.main(["phenomena", "--bundle", str(bundle), "--out-dir", str(tmp_path),
                      "--builtin-resources", str(container)]) == 0
     assert seen["extra_archives"] == [str(container)]
 

@@ -200,6 +200,17 @@ def main(argv=None):
     cc.add_argument("--master-cache", help="where fetched tables are cached")
     cc.add_argument("--out", required=True)
 
+    mt = sub.add_parser("master-tables",
+                        help="extract the four key-addressed mysekai master "
+                             "tables (blueprints, items, music records, "
+                             "wordings), one keyed document per table")
+    mt.add_argument("--master", help="directory of caller-supplied master tables")
+    mt.add_argument("--master-url", nargs="?", const="", default=None,
+                    help="base URL to append <table>.json to; no value uses the public default base")
+    mt.add_argument("--master-cache", help="where fetched tables are cached")
+    mt.add_argument("--out", required=True,
+                    help="directory the four documents are written into")
+
     e = sub.add_parser("emoticons", help="extract overhead-item effect packages")
     e.add_argument("--bundle", action="append", required=True); e.add_argument("--out-dir", required=True)
     v = sub.add_parser("avatar-parts", help="extract player-appearance packages (skin/decoration/penlight)")
@@ -275,6 +286,24 @@ def main(argv=None):
     u.add_argument("--bundle", action="append", required=True,
                    help="an action-icon bundle; repeat for as many as wanted")
     u.add_argument("--out-dir", required=True)
+    lay = sub.add_parser("ui-layout",
+                         help="extract the RectTransform hierarchy of the UI "
+                              "prefabs (screen layers, dialogs) the player data "
+                              "builds, plus a census of the UI package families")
+    lay.add_argument("--player-data", required=True,
+                     help="the APK player data file; every screen and dialog "
+                          "prefab lives in its resources.assets (Resources.Load "
+                          "fetches them, so no bundle name routes to them)")
+    lay.add_argument("--out-dir", required=True,
+                     help="the output directory (ui-layout/) that receives one "
+                          "document per prefab plus census.json")
+    lay.add_argument("--bundles", default=None,
+                     help="optional decrypted-package directory; named so the "
+                          "census also reports what the per-screen download "
+                          "packages contain (textures and effects, not layout)")
+    lay.add_argument("--bundle-manifest", default=None,
+                     help="optional AssetBundleInfoNew.json; supplies the "
+                          "isBuiltin split and declared sizes for the census")
     f = sub.add_parser("fixture-master-slice",
                        help="slice mysekaiFixtures down to the columns the "
                             "runtime reads (button gating and footprint)")
@@ -470,6 +499,22 @@ def main(argv=None):
                          ensure_ascii=False))
         return 0
 
+    if args.cmd == "ui-layout":
+        from ui.prefab_layout import extract_layout
+        result = extract_layout(args.player_data, args.out_dir,
+                                bundles_root=args.bundles,
+                                bundle_manifest=args.bundle_manifest)
+        for item in result["written"]:
+            summary = item["summary"]
+            print(f"layout: {item['family']}/{item['prefab']} "
+                  f"nodes={summary['nodes']} sprites={summary['spriteReferences']} "
+                  f"texts={summary['textComponents']} "
+                  f"partial={len(summary['partialComponents'])}")
+        for item in result["failures"]:
+            print(f"layout FAILED {item['prefab']}: {item['reason']}")
+        print(f"census: {result['censusPath']}")
+        return 0 if not result["failures"] else 1
+
     if args.cmd == "fixture-master-slice":
         source, cache = _master_source(args)
         if not source:
@@ -500,6 +545,17 @@ def main(argv=None):
                          ensure_ascii=False))
         return 0
 
+    if args.cmd == "master-tables":
+        source, cache = _master_source(args)
+        if not source:
+            ap.error("master-tables needs master tables: "
+                     "pass --master <dir> or --master-url")
+        from core.master_tables import extract_master_tables
+        print(json.dumps(extract_master_tables(source, args.out,
+                                               master_cache=cache),
+                         ensure_ascii=False))
+        return 0
+
     if args.cmd == "emoticons":
         from chara.emoticons import extract_emoticons
         print(json.dumps(extract_emoticons(args.bundle, args.out_dir), ensure_ascii=False))
@@ -521,9 +577,14 @@ def main(argv=None):
             "counts": record["counts"]}, ensure_ascii=False))
         return 0
     if args.cmd == "phenomena":
-        from .assets.packages import builtin_archive_paths
+        from .assets.packages import builtin_archive_paths, require_paths
         from phenomena.environments import extract_phenomena
         source, cache = _master_source(args)
+        # --bundle takes paths, not bare package names: PackageStore keys the
+        # store by basename and UnityPy.load answers a path that is not there
+        # with an empty environment and no error, so a bare name runs green
+        # over zero objects.  Refuse it here, before any work is done.
+        require_paths(args.bundle)
         report = extract_phenomena(args.bundle, args.out_dir,
                                    bundle_root=args.bundle_root, master=source,
                                    master_cache=cache, vgmstream=args.vgmstream,
@@ -558,8 +619,12 @@ def main(argv=None):
                          ensure_ascii=False))
         return 0
     if args.cmd == "site":
+        from .assets.packages import require_paths
         from sites.pack import extract_sites
         source, cache = _master_source(args)
+        # Same refusal as the phenomena command: a bare package name under
+        # --bundle would extract zero objects and report green.
+        require_paths(args.bundle)
         report = extract_sites(args.bundle, args.out_dir,
                                bundle_root=args.bundle_root, master=source,
                                master_cache=cache)

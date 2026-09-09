@@ -52,6 +52,21 @@ def builtin_archive_paths(values):
     return paths
 
 
+def require_paths(paths, what="bundle"):
+    """Every caller-named path must exist; raise FileNotFoundError otherwise.
+
+    ``UnityPy.load`` answers a path that is not there with an empty
+    environment and no error, so a caller that hands over a bare package name
+    instead of a path gets a run that reports zero objects and exits green.
+    Callers whose argument is meant to be a path check it here, at the
+    entrance, so that mistake fails loudly before any work is done.
+    """
+    missing = [str(path) for path in paths or [] if not Path(path).exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"{what} path does not exist: {', '.join(missing)}")
+
+
 def pairs(entries):
     """Unity serialises property maps as (name, value) pairs; accept either form."""
     for entry in entries or []:
