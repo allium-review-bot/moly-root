@@ -97,6 +97,11 @@ def main(argv=None):
     x.add_argument("--json", action="store_true",
                    help="print the full JSON report to stdout instead of a summary")
     x.add_argument("--master", help="directory of caller-supplied master tables")
+    x.add_argument("--player-data",
+                   help="path to the APK player data root; supplies the "
+                        "built-in UI and screen-layer assets that the "
+                        "download path does not carry (extract_manifest "
+                        "accepts it; the CLI used to drop it)")
     x.add_argument("--master-url", nargs="?", const="", default=None,
                     help="base URL to append <table>.json to; no value uses the public default base")
     x.add_argument("--master-cache", help="where fetched tables are cached")
@@ -369,6 +374,7 @@ def main(argv=None):
         source, cache = _master_source(args)
         report = extract_manifest(args.manifest, args.bundles, args.out, args.unity_version,
                                   master=source, master_cache=cache,
+                                  player_data=args.player_data,
                                   fixture_meshes=args.fixture_meshes,
                                   fixture_particles=args.fixture_particles,
                                   builtin_resources=builtin_archive_paths(
