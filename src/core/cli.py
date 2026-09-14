@@ -200,21 +200,30 @@ def main(argv=None):
     cc.add_argument("--master-cache", help="where fetched tables are cached")
     cc.add_argument("--out", required=True)
 
+    from core.master_tables import REGISTERED_TABLES
     mt = sub.add_parser("master-tables",
-                        help="extract the four key-addressed mysekai master "
-                             "tables (blueprints, items, music records, "
-                             "wordings), one keyed document per table")
+                        help="extract selected key-addressed mysekai master "
+                             "tables, defaulting to blueprints, items, music "
+                             "records and wordings")
     mt.add_argument("--master", help="directory of caller-supplied master tables")
     mt.add_argument("--master-url", nargs="?", const="", default=None,
                     help="base URL to append <table>.json to; no value uses the public default base")
     mt.add_argument("--master-cache", help="where fetched tables are cached")
+    mt.add_argument("--table", dest="tables", action="append",
+                    choices=tuple(REGISTERED_TABLES),
+                    help="registered table to export; repeat to select more "
+                         "(omitting this exports only the original four tables)")
     mt.add_argument("--out", required=True,
-                    help="directory the four documents are written into")
+                    help="directory the selected documents are written into")
 
     e = sub.add_parser("emoticons", help="extract overhead-item effect packages")
     e.add_argument("--bundle", action="append", required=True); e.add_argument("--out-dir", required=True)
     v = sub.add_parser("avatar-parts", help="extract player-appearance packages (skin/decoration/penlight)")
     v.add_argument("--bundle", action="append", required=True); v.add_argument("--out-dir", required=True)
+    ht = sub.add_parser("harvest-tools", help="extract original harvest-tool prefabs and their material data")
+    ht.add_argument("--bundle", action="append", required=True)
+    ht.add_argument("--bundle-root", help="directory containing declared shader dependencies")
+    ht.add_argument("--out-dir", required=True, help="tool directory, normally <assets>/avatar/tools")
     pa = sub.add_parser("player-avatar",
                         help="export the player avatar composite (audience model + skeleton + motion clips) as one glb")
     pa.add_argument("--bundle", action="append", required=True,
@@ -322,6 +331,11 @@ def main(argv=None):
     q.add_argument("--master-url", nargs="?", const="", default=None,
                    help="base URL to append <table>.json to; no value uses the public default base")
     q.add_argument("--master-cache", help="where fetched tables are cached")
+    ua = sub.add_parser("ui-audio", help="extract embedded UI cue sheets with the shared audio decoder")
+    ua.add_argument("--apk", required=True)
+    ua.add_argument("--out", required=True)
+    ua.add_argument("--vgmstream")
+    ua.add_argument("--ffmpeg")
     a = sub.add_parser("fetch-apk", help="discover, download, or inspect an Android APK")
     a.add_argument("--endpoint", default=None); a.add_argument("--timeout", type=float, default=30.0); a.add_argument("--retries", type=int, default=3)
     asub = a.add_subparsers(dest="apk_command", required=True)
@@ -385,6 +399,11 @@ def main(argv=None):
             for name, records, unique in shader_census.by_shader(entries, args.platform)[:10]:
                 print(f"  {unique:6d} distinct / {records:6d} records  {name}")
         return 1 if counts["platformErrors"] else 0
+    if args.cmd == "ui-audio":
+        from ui.audio import extract_ui_audio
+        report = extract_ui_audio(args.apk, args.out, decoder=args.vgmstream, transcoder=args.ffmpeg)
+        print(json.dumps(report, ensure_ascii=False))
+        return 0
     if args.cmd == "fetch-apk":
         from . import apk
         forwarded = []
@@ -552,7 +571,7 @@ def main(argv=None):
                      "pass --master <dir> or --master-url")
         from core.master_tables import extract_master_tables
         print(json.dumps(extract_master_tables(source, args.out,
-                                               master_cache=cache),
+                                               master_cache=cache, tables=args.tables),
                          ensure_ascii=False))
         return 0
 
@@ -564,6 +583,11 @@ def main(argv=None):
         from chara.avatar_parts import extract_avatar_parts
         print(json.dumps(extract_avatar_parts(args.bundle, args.out_dir), ensure_ascii=False))
         return 0
+    if args.cmd == "harvest-tools":
+        from chara.harvest_tools import extract_harvest_tools
+        result = extract_harvest_tools(args.bundle, args.out_dir, bundle_root=args.bundle_root)
+        print(json.dumps(result, ensure_ascii=False))
+        return 1 if any(row["status"] == "failed" for row in result["perBundle"].values()) else 0
     if args.cmd == "player-avatar":
         from chara.player_avatar import export_player_avatar, write_motion_manifest
         record = export_player_avatar(args.bundle, args.out_dir, name=args.name)
