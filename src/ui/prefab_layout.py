@@ -29,13 +29,11 @@ from __future__ import annotations
 import struct
 import math
 import hashlib
-import warnings
 from pathlib import Path
 
 import UnityPy
 from core.unity import configure_fallback_unity_version
 
-warnings.filterwarnings("ignore")
 
 configure_fallback_unity_version()
 

@@ -14,9 +14,7 @@ from typing import Callable, Iterable
 
 import UnityPy
 from core.unity import configure_fallback_unity_version
-import warnings
 
-warnings.filterwarnings("ignore")
 
 configure_fallback_unity_version()
 

@@ -1,5 +1,6 @@
 """Single command-line entry point for bundle extraction."""
 import argparse
+import warnings
 import json
 import sys
 from pathlib import Path
@@ -67,6 +68,12 @@ def _print_extract_summary(report, out_dir):
 
 
 def main(argv=None):
+    # UnityPy warns about asset shapes it does not model. Silencing that is
+    # this command's choice to make, so it is made here, once, for this
+    # process. It used to sit at module scope in four extractors, where
+    # importing one rewrote the warning filters of any program that used this
+    # package as a library -- including filters that program had set itself.
+    warnings.filterwarnings("ignore")
     ap = argparse.ArgumentParser(prog="moly", description="Extract Unity humanoid assets")
     ap.add_argument("--unity-version", default=None)
     sub = ap.add_subparsers(dest="cmd", required=True)
