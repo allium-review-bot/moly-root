@@ -46,15 +46,17 @@ def export_colors(fixtures, bundles, out):
     from core.assets.packages import PackageStore
     from core.gltf import unity_sampler
 
-    result = {}
+    requirements = {}
     for fixture in fixtures:
         variants = fixture.get("mysekaiFixtureAnotherColors") or []
         asset = fixture.get("assetbundleName", "")
         if not variants or not asset.startswith("mdl_"):
             continue
+        requirements.setdefault(asset, {1}).update(int(row["textureId"]) for row in variants)
+
+    result = {}
+    for asset, texture_ids in sorted(requirements.items()):
         name = "mysekai__fixture__" + asset
-        if name in result:
-            continue
         store = PackageStore([], root=bundles)
         package = store.package(name)
         if package is None:
@@ -92,7 +94,7 @@ def export_colors(fixtures, bundles, out):
 
         colors = {}
         base = "tex_" + asset[len("mdl_"):]
-        for texture_id in sorted({1, *(int(row["textureId"]) for row in variants)}):
+        for texture_id in sorted(texture_ids):
             main = write_texture(f"{base}_{texture_id}")
             emission = None
             for suffix in ("always", "dark", "bright"):

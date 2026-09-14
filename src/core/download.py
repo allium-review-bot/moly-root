@@ -46,9 +46,44 @@ def _strong_etag(value):
 def _length(value):
     if value is None:
         return None
+    value = value.strip()
     if not re.fullmatch(r"[0-9]+", value):
         raise InvalidDownload(f"invalid Content-Length: {value!r}")
-    return int(value)
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise InvalidDownload("Content-Length is too large to parse") from exc
+
+
+def _header_values(headers, name):
+    """Retain every field occurrence instead of collapsing repeated headers."""
+    if hasattr(headers, "get_all"):
+        return headers.get_all(name, [])
+    value = headers.get(name)
+    return [] if value is None else [value]
+
+
+def _response_length(response):
+    """Accept one decimal length or a single, actually decoded chunked body.
+
+    Repeated Content-Length fields and comma lists are deliberately rejected,
+    even when equal. urllib chooses its own framing before returning a response;
+    accepting a normalization it did not perform could otherwise change which
+    bytes our caller treats as the resource.
+    """
+    lengths = _header_values(response.headers, "Content-Length")
+    encodings = _header_values(response.headers, "Transfer-Encoding")
+    if encodings:
+        if lengths:
+            raise InvalidDownload("Transfer-Encoding and Content-Length cannot be combined")
+        if len(encodings) != 1 or encodings[0].strip().lower() != "chunked":
+            raise InvalidDownload("unsupported Transfer-Encoding; only a single chunked coding is supported")
+        if not getattr(response, "chunked", False):
+            raise InvalidDownload("HTTP client did not activate chunked transfer decoding")
+        return None
+    if len(lengths) > 1:
+        raise InvalidDownload("repeated Content-Length fields are not supported")
+    return _length(lengths[0]) if lengths else None
 
 
 def _discard(part, metadata):
@@ -115,7 +150,7 @@ def download_file(url, destination, *, expected_hash=None, identity=None,
                     response_headers = response.headers
                     if response_headers.get("Content-Encoding", "identity").lower() != "identity":
                         raise InvalidDownload("server ignored Accept-Encoding: identity")
-                    length = _length(response_headers.get("Content-Length"))
+                    length = _response_length(response)
                     etag = _strong_etag(response_headers.get("ETag"))
                     final_url = response.geturl()
                     if response.status == 206:

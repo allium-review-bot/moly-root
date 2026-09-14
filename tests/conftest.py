@@ -10,6 +10,8 @@ def http_source():
     replies, requests = [], []
 
     class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
         def do_GET(self):
             request = {"path": self.path, "range": self.headers.get("Range"),
                        "if_range": self.headers.get("If-Range"),
@@ -19,15 +21,20 @@ def http_source():
             if callable(reply):
                 reply = reply(request)
             body = reply.get("body", b"")
-            headers = {"Content-Length": str(len(body)), **reply.get("headers", {})}
+            headers = reply.get("raw_headers")
+            if headers is None:
+                headers = {"Content-Length": str(len(body)), **reply.get("headers", {})}.items()
             self.send_response(reply.get("status", 200))
-            for name, value in headers.items():
+            for name, value in headers:
                 if value is not None:
                     self.send_header(name, value)
             self.end_headers()
-            self.wfile.write(body)
-            self.wfile.flush()
             self.close_connection = True
+            try:
+                self.wfile.write(body)
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # The client can reject headers before receiving a body.
 
         def log_message(self, *_):
             pass

@@ -4,6 +4,8 @@
 
 bundle 和 APK 共用下载状态机。只有完整响应才会原子替换目标文件；失败保留原来的完整文件。实际收到的字节数必须符合 HTTP 长度与范围声明。`fileSize` 的网络表示语义尚未确定，因此不把它与解密后的字节数混比。
 
+读取正文前检查全部 `Content-Length` 和 `Transfer-Encoding`。采用严格的单值长度策略：重复长度头即使相同也拒绝，逗号列表也拒绝。传输编码只接受 HTTP 客户端确实解码的单项 `chunked`；其他编码、组合编码和 TE/CL 并存均拒绝。异常进入 `InvalidDownload` 清理与完整重试路径，不覆盖旧的完整目标。
+
 `.part.json` 记录请求 URL、对象元数据、最终 URL、强 ETag、整体长度和已保存前缀的 SHA-256。只有记录与实际前缀一致，且存在强 ETag 或用户提供的完整摘要时，才能继续下载。强 ETag 通过 `If-Range` 发送。旧版没有身份记录的 `.part` 会重新下载；完整 `200` 响应会重启。错误范围、对象变化或 hash 不符会清理临时状态。`416` 只有在完整大小与用户提供的摘要均匹配时才能放行，否则重新完整下载。每个目标使用进程锁，阻止并发写入相同临时文件。
 
 没有可信源摘要时，HTTP 长度、范围和 ETag 校验不能替代来源真实性证明；建议调用方提供 SHA-256。未知长度的完整关闭连接响应遵循 HTTP 的结束语义，无法证明服务端本来打算发送多少字节。
@@ -59,6 +61,10 @@ viewer 按索引版本读取循环语义：v1（含无版本的旧索引）读�
 
 `test_motion_index_consumer.py` 将生产者元数据送入实际 viewer 适配函数和随仓分发的 Three.js `AnimationMixer`，覆盖 v1/v2、true/false/未知、单段与族播放及 S→L→E。`test_atomic_permissions.py` 在 POSIX 上检查文件权限，并在可切换 UID 的环境中验证另一个服务 UID 能读取实际发布对象、不能读取私有 JSON。
 
+## 家具配色
+
+家具配色导出先按 `assetbundleName` 汇总所有家具行的 `textureId` 并集（包含默认配色 1），然后每个包只读取一次。输入正反序和重复配色不会改变导出覆盖；源纹理确实不存在时，仍输出 `main: null` 或 `emission: null`，不合成替代图像。
+
 ## 安装与验证
 
 wheel 和 sdist 显式携带三份 TOML、两份 MJS 和 manifest schema。默认 gzip 编解码使用标准库；Brotli 需要 Python `brotli` 或 Node.js，MJS 回退脚本随包分发。glTF 变换额外需要 `@gltf-transform/core`、`@gltf-transform/extensions`、`@gltf-transform/functions` 和 `meshoptimizer`，按 `transforms.toml` 选择版本，并用 `MOLY_QUANT_DIR` 指定依赖目录。音频解码程序仍由调用方提供。
@@ -73,6 +79,14 @@ python -m pytest -q
 
 工作目录必须尚不存在。安装验证需要访问配置的 Python 包索引，不需要游戏网络端点或真实资产。故障注入测试使用回环 HTTP、合成 JSON 和合成字节；它们不代替真实提取语料或下游视觉验收。
 
+GitHub Actions 在 Linux 和 Windows 对 PR 的 head SHA 运行全量 pytest 和干净分发安装。Linux 另以不同 UID 检查实际发布文件可读性。分发构建使用该提交的完整源码快照，不读取工作区中的未跟踪数据。每个平台上传包含提交/树 SHA、环境版本、命令、退出码、完整日志、JUnit、源码快照与分发包的 artifact，保留 30 天。相同入口可在干净 checkout 中本地运行：
+
+```sh
+python tests/run_validation.py --work-dir ../validation-evidence
+```
+
+需要预先安装项目依赖、`pytest`、`build` 和 Node.js。非 root 的 POSIX 环境可显式加 `--service-user-check`，使用可免密执行的 sudo 运行跨 UID 测试。
+
 | 审计项 | 回归覆盖 |
 | --- | --- |
 | ROOT-01 / ROOT-02 | 完整及截短响应、合法/错误续传、ETag 变化、hash 失败、416 恢复、APK 与并发锁 |
@@ -86,3 +100,5 @@ python -m pytest -q
 | PR1-R1 | 生产者到 viewer 的循环语义、真实 Three.js mixer、未知元数据及旧版兼容 |
 | PR1-R2 | 发布/私有模式、新建/更新/复用文件、原子替换前设置权限、跨 UID 实际读取 |
 | PR1-R3 | 活动根命名为 release/catalogs、历史条目、显式根、CLI 与 GC 端到端 |
+| PR1-R4 | 重复/列表长度头、传输编码与 TE/CL 冲突、正常 chunked、旧目标保护及干净重试 |
+| PR1-R5 | 同包配色并集、正反序一致、重复/重叠需求、真实 PNG 和缺失源纹理的 null 语义 |

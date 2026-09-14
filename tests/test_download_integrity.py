@@ -1,5 +1,6 @@
 """Exercise real HTTP framing, resumptions and retries without game endpoints."""
 import hashlib
+import gzip
 import json
 from pathlib import Path
 import sys
@@ -192,3 +193,74 @@ def test_json_object_duplicates_cannot_hide_conflicting_bundle_definitions(tmp_p
     manifest.write_text('{"bundles":{"same":{"crc":1},"same":{"crc":2}}}', encoding="utf-8")
     with pytest.raises(ValueError, match="duplicate JSON key"):
         Manifest.load(manifest)
+
+
+INVALID_FRAMING = [
+    pytest.param([("Content-Length", "3"), ("Content-Length", "6")], b"abcdef", id="conflicting-lengths"),
+    pytest.param([("Content-Length", "6"), ("content-length", "6")], b"abcdef", id="identical-lengths-rejected"),
+    pytest.param([("Content-Length", "6, 6")], b"abcdef", id="identical-list-rejected"),
+    pytest.param([("Content-Length", "3, 6")], b"abcdef", id="conflicting-list"),
+    pytest.param([("Content-Length", "6, invalid")], b"abcdef", id="invalid-list"),
+    pytest.param([("Transfer-Encoding", "gzip")], gzip.compress(b"abcdef", mtime=0), id="gzip-transfer"),
+    pytest.param([("Transfer-Encoding", "gzip, chunked")], b"3\r\nabc\r\n0\r\n\r\n", id="stacked-transfer"),
+    pytest.param([("Transfer-Encoding", "chunked"), ("Content-Length", "6")],
+                 b"6\r\nabcdef\r\n0\r\n\r\n", id="transfer-and-length"),
+    pytest.param([("Transfer-Encoding", "chunked"), ("Transfer-Encoding", "gzip")],
+                 b"6\r\nabcdef\r\n0\r\n\r\n", id="repeated-transfer"),
+    pytest.param([("Transfer-Encoding", "identity")], b"abcdef", id="unsupported-identity-transfer"),
+]
+
+
+@pytest.mark.parametrize("headers,body", INVALID_FRAMING)
+@pytest.mark.parametrize("existing", [False, True])
+def test_invalid_http_framing_never_publishes_or_overwrites(http_source, tmp_path, headers, body, existing):
+    base, replies, _ = http_source
+    target = tmp_path / "probe"
+    if existing:
+        target.write_bytes(b"PREVIOUS")
+    replies.append({"raw_headers": headers, "body": body})
+    with pytest.raises(RuntimeError):
+        download_one(entry(), base, tmp_path, retries=1)
+    if existing:
+        assert target.read_bytes() == b"PREVIOUS"
+    else:
+        assert not target.exists()
+    assert not (tmp_path / "probe.part").exists()
+    assert not (tmp_path / "probe.part.json").exists()
+
+
+@pytest.mark.parametrize("headers,body", INVALID_FRAMING)
+def test_invalid_http_framing_recovers_with_a_clean_full_retry(http_source, tmp_path, headers, body):
+    base, replies, requests = http_source
+    replies.extend([{"raw_headers": headers, "body": body}, {"body": b"GOODOK"}])
+    download_one(entry(), base, tmp_path, retries=2)
+    assert (tmp_path / "probe").read_bytes() == b"GOODOK"
+    assert [request["range"] for request in requests] == [None, None]
+
+
+@pytest.mark.parametrize("coding", ["chunked", "CHUNKED"])
+def test_supported_chunked_body_is_decoded_before_publication(http_source, tmp_path, coding):
+    base, replies, _ = http_source
+    replies.append({"raw_headers": [("Transfer-Encoding", coding)],
+                    "body": b"3;extension=yes\r\nabc\r\n3\r\ndef\r\n0\r\nX-Probe: done\r\n\r\n"})
+    report = download_one(entry(), base, tmp_path, retries=1)
+    assert report["bytes"] == 6
+    assert (tmp_path / "probe").read_bytes() == b"abcdef"
+
+
+def test_conflicting_length_headers_are_rejected_even_with_a_trusted_hash(http_source, tmp_path):
+    base, replies, _ = http_source
+    replies.append({"raw_headers": [("Content-Length", "3"), ("Content-Length", "6")], "body": b"abcdef"})
+    with pytest.raises(RuntimeError):
+        download_one(entry(sha256=hashlib.sha256(b"abcdef").hexdigest()), base, tmp_path, retries=1)
+    assert not (tmp_path / "probe").exists()
+
+
+def test_ambiguous_resumption_discards_the_checkpoint_before_retrying(http_source, tmp_path):
+    base, replies, requests = http_source
+    replies.extend([partial(), {"status": 206, "body": b"def", "raw_headers": [
+        ("Content-Range", "bytes 3-5/6"), ("Content-Length", "3"), ("Content-Length", "6"), ("ETag", '"v1"')]},
+        {"body": b"abcdef"}])
+    download_one(entry(), base, tmp_path, retries=3)
+    assert (tmp_path / "probe").read_bytes() == b"abcdef"
+    assert [request["range"] for request in requests] == [None, "bytes=3-", None]
