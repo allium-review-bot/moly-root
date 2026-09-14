@@ -74,6 +74,8 @@ DOMAIN_OBJECT_TYPES = {
     "fixture-timeline": {"MonoBehaviour", "PlayableDirector", "AnimationClip"},
     "avatar-part": {"Mesh", "MeshFilter", "MeshRenderer", "Material", "Texture2D",
                     "Shader"},
+    "harvest-tool": {"Mesh", "MeshFilter", "MeshRenderer", "Material", "Texture2D",
+                     "Shader"},
 }
 
 
@@ -221,6 +223,7 @@ FIXED_ARTIFACT_PATHS = (
     "tweets.json",
     "emoticons/emoticons.json",
     "avatar-parts/avatar-parts.json",
+    "avatar/tools/index.json",
     "phenomena/index.json",
     "site/index.json",
     "site/harvest.json",
@@ -720,6 +723,26 @@ def extract_manifest(manifest, bundles, out, unity_version=None, master=None,
                 str(out / "avatar-parts"))
         except Exception as exc:
             avatar_part_error = f"{type(exc).__name__}: {exc}"
+    # Harvest tools share the package reader with scenes, but remain a player
+    # domain with their own source-prefab identity and persistent index.
+    harvest_tool_paths, harvest_tool_errors = {}, {}
+    for name in names:
+        target = route(name)
+        if target is None or target.domain != "harvest-tool":
+            continue
+        try:
+            harvest_tool_paths[name] = _bundle_path(bundles, name)
+        except Exception as exc:
+            harvest_tool_errors[name] = f"{type(exc).__name__}: {exc}"
+    harvest_tool_result, harvest_tool_error = None, None
+    if harvest_tool_paths:
+        try:
+            from chara.harvest_tools import extract_harvest_tools
+            harvest_tool_result = extract_harvest_tools(
+                [str(path) for path in harvest_tool_paths.values()],
+                str(out / "avatar" / "tools"), bundle_root=bundles)
+        except Exception as exc:
+            harvest_tool_error = f"{type(exc).__name__}: {exc}"
     # A phenomenon spans several packages (a global one, a shared one, and one per
     # site), so its packages are extracted together in one job rather than one at a
     # time, and the shared index is written once from what that job produced.
@@ -1069,6 +1092,15 @@ def extract_manifest(manifest, bundles, out, unity_version=None, master=None,
                 if avatar_part_error:
                     raise RuntimeError(avatar_part_error)
                 result = avatar_part_result or {}
+            elif target.domain == "harvest-tool":
+                if name in harvest_tool_errors:
+                    raise FileNotFoundError(harvest_tool_errors[name])
+                if harvest_tool_error:
+                    raise RuntimeError(harvest_tool_error)
+                result = dict((harvest_tool_result or {}).get("perBundle", {}).get(name, {}))
+                if result.get("status") != "succeeded":
+                    raise RuntimeError(result.get("error", "harvest-tool package did not produce a result"))
+                result["index"] = harvest_tool_result["path"]
             elif target.domain == "phenomena":
                 if name in phenomena_errors:
                     raise FileNotFoundError(phenomena_errors[name])

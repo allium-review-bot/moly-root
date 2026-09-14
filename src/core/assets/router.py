@@ -76,6 +76,11 @@ TALK_CONSTANTS_PACKAGE = "mysekai__talk__scenario__lib"
 AVATAR_PART_PREFIX = "virtual_live__avatar__"
 AVATAR_PART_CATEGORIES = ("skin", "decoration", "penlight")
 
+# The two authored harvest-tool model families, including the shipped third
+# level even when no current master row offers it. Neighbouring tool-model
+# domains are not claimed by this bounded reader.
+HARVEST_TOOL_BUNDLE = re.compile(r"^mysekai__tool__(?:ax|pickax)000[1-5]$")
+
 
 @dataclass(frozen=True)
 class Route:
@@ -84,6 +89,8 @@ class Route:
 
 
 def route(name):
+    if HARVEST_TOOL_BUNDLE.fullmatch(name):
+        return Route("harvest-tool", "harvest-tools")
     if "__character__mdl_sd_" in name:
         return Route("character", "characters")
     if name == "mysekai__character_motion":
