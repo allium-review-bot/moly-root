@@ -3,12 +3,29 @@ from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import stat
 import tempfile
 
+PUBLIC_FILE_MODE = 0o644
+PRIVATE_FILE_MODE = 0o600
 
-def write_bytes(path, data):
-    """Publish complete bytes using a temporary file on the same filesystem."""
+
+def write_bytes(path, data, *, mode=None):
+    """Replace bytes atomically, setting permissions before publication.
+
+    An explicit mode is the caller's policy for both creation and replacement.
+    With no mode, preserve an existing regular file's permission bits, or create
+    a private file. Ownership, ACLs and special mode bits are not copied.
+    """
     path = Path(path)
+    if mode is None:
+        try:
+            existing = path.stat(follow_symlinks=False)
+            mode = existing.st_mode & 0o777 if stat.S_ISREG(existing.st_mode) else PRIVATE_FILE_MODE
+        except FileNotFoundError:
+            mode = PRIVATE_FILE_MODE
+    if type(mode) is not int or not 0 <= mode <= 0o777:
+        raise ValueError("mode must contain only ordinary file permission bits (0000-0777)")
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     temporary = Path(temporary)
@@ -16,6 +33,10 @@ def write_bytes(path, data):
         with os.fdopen(fd, "wb") as stream:
             stream.write(data)
             stream.flush()
+            if hasattr(os, "fchmod"):
+                os.fchmod(stream.fileno(), mode)
+            else:
+                os.chmod(temporary, mode)
             os.fsync(stream.fileno())
         os.replace(temporary, path)
     finally:
@@ -26,8 +47,8 @@ def json_bytes(document):
     return (json.dumps(document, ensure_ascii=False, indent=2, allow_nan=False) + "\n").encode("utf-8")
 
 
-def write_json(path, document):
-    write_bytes(path, json_bytes(document))
+def write_json(path, document, *, mode=None):
+    write_bytes(path, json_bytes(document), mode=mode)
 
 
 @contextmanager

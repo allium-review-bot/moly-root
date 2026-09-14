@@ -87,7 +87,9 @@ print(json.dumps({"python": sys.version, "node_fallback_checked": node_fallback}
     weather = assets / "phenomena" / "001_sunny"
     weather.mkdir(parents=True)
     (weather / "config.json").write_text('{"synthetic": true}', encoding="utf-8")
-    standalone, grouped = work / "standalone", work / "grouped"
+    # A release root may itself be called "catalogs"; only its content-addressed
+    # historical children live one level below that root.
+    standalone, grouped = work / "standalone", work / "catalogs"
     run("standalone-build", [str(python), "-m", "pack.build", "--src", str(assets),
                               "--out", str(standalone), "--version", "smoke"])
     run("standalone-verify", [str(python), "-m", "pack.verify", "--out", str(standalone)])
@@ -96,12 +98,15 @@ print(json.dumps({"python": sys.version, "node_fallback_checked": node_fallback}
         run("groups-" + version, [str(python), "-m", "pack.groups", "--src", str(assets),
                                   "--out", str(grouped), "--version", version])
     run("groups-verify", [str(python), "-m", "pack.verify", "--out", str(grouped)])
+    historical = next((grouped / "catalogs").glob("*.json"))
+    run("history-verify", [str(python), "-m", "pack.verify", "--catalog", str(historical)])
     garbage = json.loads(run("groups-gc", [str(python), "-m", "pack.gc", "--out", str(grouped), "--json"]))
     assert garbage["delete"] == [] and garbage["retained_catalogs"] == 2
     result = {"wheel": wheel.name, "wheel_sha256": hashlib.sha256(wheel.read_bytes()).hexdigest(),
               "sdist": sdist.name, "resources": sorted(RESOURCES), "runtime": runtime_info,
               "cli_help": "passed", "standalone_pack": "passed", "grouped_pack": "passed",
-              "retained_catalogs": garbage["retained_catalogs"]}
+              "retained_catalogs": garbage["retained_catalogs"], "catalog_root_name": grouped.name,
+              "historical_catalog": "passed"}
     (work / "result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(result, indent=2))
     return result

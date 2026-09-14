@@ -35,6 +35,8 @@ CLI 使用默认快照；不同版本应使用含版本的来源 URL，或另一
 
 现存 blob 只有实际大小、hash、解码后大小与 hash 都正确才复用。损坏对象会重新编码并原子替换；每次发布前独立 verifier 会重新核对本次引用的磁盘内容。
 
+POSIX 发布文件（blob、包清单、活动和历史 catalog）使用显式 `0644` 权限，临时文件在原子替换前设置权限。复用旧 blob 时也会恢复发布权限。`core.atomic` 的通用写入默认保留既有普通文件的权限位，新文件默认 `0600`；master 缓存和下载状态保持私密。显式 `mode` 覆盖创建和更新策略，不复制旧文件的所有权、ACL 或特殊权限位。目录的访问权限由部署目录配置决定。
+
 分组包清单使用 `packages/<完整清单 SHA-256>.json`。一次构建先完成并校验全部包的版本、路径所有权、依赖和 blob，再写入 `catalogs/<catalog SHA-256>.json`，最后原子替换入口 `asset-packs.json`。旧 catalog 引用的包清单始终保留；读取、编码或写入失败不会改写旧包清单。入口切换完成后发生异常时，新入口已经指向完整的新版本。
 
 ```sh
@@ -45,7 +47,17 @@ python -m pack.gc --out packages --json
 
 `pack.verify --out` 自动识别 grouped catalog，并验证所有保留的历史 catalog；独立 manifest 仍可通过 `--manifest` 检查。schema 随安装包提供，`--schema` 仅用于覆盖。未被当前或历史 catalog 引用的 blob 单独列为 GC 候选。`pack.gc --out` 以所有保留代的引用并集计算候选，**只报告，不删除**。`--old/--new` 是两个独立 manifest 的差集，不可用来回收共享的 grouped blob store。
 
+活动发布根可以叫 `catalogs`。`verify_catalog(..., root=...)` 始终使用显式根；CLI `--out` 和 GC 将该根传给校验器。没有显式根时，仅对实际内容地址匹配的 `catalogs/<SHA-256>.json` 历史条目向上定位一层，活动 `asset-packs.json` 使用自己的父目录。
+
 原子替换保证普通文件系统上的进程可见性；该流程不承诺断电后目录元数据的持久化，也不能把对象存储中的多次上传变成事务。远程发布需要先上传不可变包清单和 blob，再切换 catalog。
+
+## 动作索引与 viewer
+
+viewer 按索引版本读取循环语义：v1（含无版本的旧索引）读取 `loop`，v2 读取 `sourceLoopTime`。仅布尔值是已解析的循环标记；缺失或无效值保持未知，`legacySuffixLoop` 不会覆盖源元数据。共享动作库的元数据优先于角色条目中残留的旧循环标记。
+
+单段点播遇到未知循环标记时显示“缺少循环信息”，不启动该片段，也不改变已经播放的动作。族播放的 S→L→E 是独立的显式策略，L 段继续循环；这不会改变索引保存的源循环标记。
+
+`test_motion_index_consumer.py` 将生产者元数据送入实际 viewer 适配函数和随仓分发的 Three.js `AnimationMixer`，覆盖 v1/v2、true/false/未知、单段与族播放及 S→L→E。`test_atomic_permissions.py` 在 POSIX 上检查文件权限，并在可切换 UID 的环境中验证另一个服务 UID 能读取实际发布对象、不能读取私有 JSON。
 
 ## 安装与验证
 
@@ -71,3 +83,6 @@ python -m pytest -q
 | ROOT-07 | 重复定义、相同别名合并、大小写/临时文件键碰撞、JSON 重复键 |
 | ROOT-08 / ROOT-09 | 根内父级引用、GLB 相对 URI、越界、源/输出/overlay 重叠及链接别名 |
 | ROOT-10 | 缺 condition、缺类型、缺 group、悬空 unit group，及已有家具/非家具对照 |
+| PR1-R1 | 生产者到 viewer 的循环语义、真实 Three.js mixer、未知元数据及旧版兼容 |
+| PR1-R2 | 发布/私有模式、新建/更新/复用文件、原子替换前设置权限、跨 UID 实际读取 |
+| PR1-R3 | 活动根命名为 release/catalogs、历史条目、显式根、CLI 与 GC 端到端 |

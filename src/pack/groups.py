@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import re
 
-from core.atomic import exclusive_lock, json_bytes, write_bytes
+from core.atomic import PUBLIC_FILE_MODE, exclusive_lock, json_bytes, write_bytes
 
 from .build import build, iter_files
 from .paths import asset_path, canonical_inputs, output_path, separate_output
@@ -147,10 +147,10 @@ def _build_groups(source, output, version):
     # Keep every previous publication as a GC root. Package manifests and blobs
     # are immutable, so even a reader holding the old catalog sees one version.
     if previous_bytes is not None:
-        write_bytes(output_path(output, f"catalogs/{hashlib.sha256(previous_bytes).hexdigest()}.json"), previous_bytes)
+        write_bytes(output_path(output, f"catalogs/{hashlib.sha256(previous_bytes).hexdigest()}.json"), previous_bytes, mode=PUBLIC_FILE_MODE)
     data = json_bytes(catalog)
-    write_bytes(output_path(output, f"catalogs/{hashlib.sha256(data).hexdigest()}.json"), data)
-    write_bytes(current_path, data)
+    write_bytes(output_path(output, f"catalogs/{hashlib.sha256(data).hexdigest()}.json"), data, mode=PUBLIC_FILE_MODE)
+    write_bytes(current_path, data, mode=PUBLIC_FILE_MODE)
     return catalog
 
 

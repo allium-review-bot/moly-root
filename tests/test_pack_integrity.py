@@ -57,8 +57,8 @@ def test_independent_final_validation_detects_a_bad_disk_write(tmp_path, monkeyp
     src, out = source(tmp_path), tmp_path / "output"
     write = build_module.write_bytes
 
-    def corrupt(path, data):
-        return write(path, b"BAD!" if "blobs" in Path(path).parts else data)
+    def corrupt(path, data, **kwargs):
+        return write(path, b"BAD!" if "blobs" in Path(path).parts else data, **kwargs)
 
     monkeypatch.setattr(build_module, "write_bytes", corrupt)
     with pytest.raises(RuntimeError, match="invalid manifest"):
@@ -245,3 +245,47 @@ def test_grouped_glb_parent_uris_use_the_same_canonical_path_contract(tmp_path):
     assert "image.png" in paths
     assert all(".." not in path.split("/") for path in paths)
     assert verify_catalog(out / "asset-packs.json")[0] == []
+
+
+@pytest.mark.parametrize("directory", ["release", "catalogs"])
+@pytest.mark.parametrize("historical", [False, True])
+@pytest.mark.parametrize("explicit_root", [False, True])
+def test_active_and_historical_catalog_roots_do_not_depend_on_output_name(tmp_path, directory, historical, explicit_root):
+    src, out = grouped_source(tmp_path), tmp_path / directory
+    build_groups(src, out, "v1")
+    path = next((out / "catalogs").glob("*.json")) if historical else out / "asset-packs.json"
+    errors, info = verify_catalog(path, root=out if explicit_root else None)
+    assert errors == []
+    assert info["packages"] == 3
+    assert info["orphan_blobs"] == []
+
+
+@pytest.mark.parametrize("directory", ["release", "catalogs"])
+def test_catalog_cli_and_gc_respect_the_output_root(tmp_path, directory, capsys):
+    from pack.verify import main as verify_main
+    from pack.gc import main as gc_main
+    src, out = grouped_source(tmp_path), tmp_path / directory
+    build_groups(src, out, "v1")
+    assert verify_main(["--out", str(out)]) == 0
+    assert gc_main(["--out", str(out), "--json"]) == 0
+    assert catalog_garbage(out)["delete"] == []
+    assert "OK 3 packages" in capsys.readouterr().out
+
+
+def test_explicit_root_takes_priority_even_for_a_content_named_catalog(tmp_path):
+    src, out = grouped_source(tmp_path), tmp_path / "catalogs"
+    build_groups(src, out, "v1")
+    data = (out / "asset-packs.json").read_bytes()
+    path = out / (hashlib.sha256(data).hexdigest() + ".json")
+    path.write_bytes(data)
+    assert verify_catalog(path, root=out)[0] == []
+
+
+@pytest.mark.parametrize("explicit_root", [False, True])
+def test_history_root_inference_requires_a_valid_content_address(tmp_path, explicit_root):
+    src, out = grouped_source(tmp_path), tmp_path / "release"
+    build_groups(src, out, "v1")
+    path = out / "catalogs" / ("0" * 64 + ".json")
+    path.write_bytes((out / "asset-packs.json").read_bytes())
+    with pytest.raises(ValueError, match="content address"):
+        verify_catalog(path, root=out if explicit_root else None)

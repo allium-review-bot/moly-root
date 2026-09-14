@@ -462,11 +462,19 @@ def verify_catalog(catalog_path, schema_path=None, *, retained_catalogs=None, ro
     can legitimately leave them behind. All retained catalogs are roots, not
     just one package's manifest or the active generation.
     """
-    catalog_path = Path(catalog_path)
-    root = Path(root).resolve() if root is not None else catalog_path.parent.resolve()
-    if root.name == "catalogs" and root == catalog_path.parent.resolve():
-        root = root.parent
-    catalog = json.loads(catalog_path.read_bytes())
+    catalog_path = Path(catalog_path).resolve()
+    raw = catalog_path.read_bytes()
+    historical = (catalog_path.parent.name == "catalogs"
+                  and re.fullmatch(r"[0-9a-f]{64}\.json", catalog_path.name))
+    if historical and catalog_path.stem != _sha256_bytes(raw):
+        raise ValueError("historical catalog content address mismatch")
+    if root is not None:
+        root = Path(root).resolve()
+    else:
+        root = catalog_path.parent
+        if historical:
+            root = root.parent
+    catalog = json.loads(raw)
     errors, info = verify_catalog_data(catalog, root, schema_path)
     active = set(info["referenced_blobs"])
     retained = set()
@@ -507,7 +515,7 @@ def main(argv=None):
         if args.manifest or args.blobs:
             ap.error("--catalog cannot be combined with --manifest or --blobs")
         try:
-            errors, info = verify_catalog(catalog, args.schema)
+            errors, info = verify_catalog(catalog, args.schema, root=args.out)
         except (OSError, ValueError) as exc:
             print(f"FAIL {exc}")
             return 1

@@ -21,7 +21,7 @@ from .verify import verify_catalog
 def catalog_garbage(output):
     """List unused blobs only after validating every retained release root."""
     output = Path(output)
-    errors, info = verify_catalog(output / "asset-packs.json")
+    errors, info = verify_catalog(output / "asset-packs.json", root=output)
     if errors:
         raise ValueError("cannot determine catalog garbage: " + "; ".join(errors))
     return {"delete": info["orphan_blobs"],

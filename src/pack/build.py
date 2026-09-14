@@ -25,13 +25,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from core.atomic import json_bytes, write_bytes
+from core.atomic import PUBLIC_FILE_MODE, json_bytes, write_bytes
 
 from . import codecs
 from .categories import VALID_XF, load_categories
@@ -193,7 +194,7 @@ def build(src, out, version, *, categories_path=None, blob_prefix=DEFAULT_BLOB_P
             dest = output_path(blobs_dir, blob_rel)
             dest.parent.mkdir(parents=True, exist_ok=True)
             if not dest.is_file() or dest.stat().st_size != len(encoded) or sha256_file(dest) != blob_sha:
-                write_bytes(dest, encoded)
+                write_bytes(dest, encoded, mode=PUBLIC_FILE_MODE)
             cached = (blob_rel, len(encoded), blob_sha, len(content))
             blob_cache[cache_key] = cached
         blob_rel, blob_len, blob_sha, _content_len = cached
@@ -273,13 +274,20 @@ def build(src, out, version, *, categories_path=None, blob_prefix=DEFAULT_BLOB_P
         "entries": entries,
     }
 
+    # Reused bytes may have been produced with a previous private-file policy.
+    # They are public release objects too, even when no rewrite was necessary.
+    if os.name == "posix":
+        for blob_rel, *_ in blob_cache.values():
+            path = output_path(blobs_dir, blob_rel)
+            if path.stat().st_mode & 0o777 != PUBLIC_FILE_MODE:
+                path.chmod(PUBLIC_FILE_MODE)
     errors, _ = verify_manifest(manifest, blobs_dir, check_orphans=False)
     if errors:
         raise RuntimeError("refusing to publish invalid manifest: " + "; ".join(errors))
     data = json_bytes(manifest)
     if manifest_path is None:
         manifest_path = output_path(out, f"packages/{sha256_bytes(data)}.json")
-    write_bytes(manifest_path, data)
+    write_bytes(manifest_path, data, mode=PUBLIC_FILE_MODE)
 
     # Dedup savings, in gen.mjs's own terms: logical_bytes minus content_bytes
     # (both already computed above) is exactly the decoded bytes that did not
