@@ -56,6 +56,8 @@ from UnityPy.helpers.MeshHelper import MeshHandler
 from core.assets.packages import PackageStore
 from core.gltf import GLB
 from core.jsonio import write_json
+from core.renderer import shadow_casting_mode_or_gap
+from core.shader_passes import declared_passes, texture_defaults
 from core.mesh import (FLOAT, UNSIGNED_INT, ARRAY_BUFFER, ELEMENT_ARRAY_BUFFER,
                        TRIANGLES, NOT_TRIANGLES, INDEX_RANGE, compose_mesh,
                        skin_accessors)
@@ -299,27 +301,12 @@ def _shader_value(store, record, material_tree):
     if not isinstance(shader_name, str) or not shader_name:
         return {"status": "unresolved",
                 "reason": f"Shader object {shader_id} has no parsed name"}
-    shader = {"status": "resolved", "name": shader_name}
-    passes = []
-    light_modes = []
-    for subshader in parsed.get("m_SubShaders") or []:
-        for shader_pass in subshader.get("m_Passes") or []:
-            state = shader_pass.get("m_State") or {}
-            tags = {}
-            for entry in (state.get("m_Tags") or {}).get("tags") or []:
-                if isinstance(entry, (list, tuple)) and len(entry) == 2:
-                    tags[str(entry[0])] = entry[1]
-                elif isinstance(entry, dict):
-                    tags[str(entry.get("first"))] = entry.get("second")
-            pass_name = shader_pass.get("m_Name") or shader_pass.get("m_PassName")
-            light_mode = tags.get("LIGHTMODE")
-            item = {"name": pass_name if pass_name else None,
-                    "lightMode": light_mode}
-            passes.append(item)
-            light_modes.append(light_mode)
+    shader = {"status": "resolved", "name": shader_name,
+              "textureDefaults": texture_defaults(parsed)}
+    passes = declared_passes(parsed)
     if passes:
         shader["shaderPasses"] = passes
-        shader["lightModes"] = light_modes
+        shader["lightModes"] = [item["lightMode"] for item in passes]
     return shader
 
 
@@ -484,6 +471,7 @@ def _material_index(glb, record, path_id, cache, tex_cache, store):
     extras.update(_shader_keywords(tt))
     extras.update(_material_properties(tt, glb, record, tex_cache))
     if shader["status"] == "resolved":
+        extras["shaderTextureDefaults"] = shader["textureDefaults"]
         if "shaderPasses" in shader:
             extras["shaderPasses"] = shader["shaderPasses"]
         if "lightModes" in shader:
@@ -580,6 +568,13 @@ def _walk(glb, record, store, tpid, parent, ctx, prefix="", fence_scope=False):
         if kind not in ("MeshRenderer", "SkinnedMeshRenderer"):
             continue
         skinned = kind == "SkinnedMeshRenderer"
+        # This belongs to the renderer instance, not the shared mesh/material.
+        shadow_mode, shadow_gap = shadow_casting_mode_or_gap(_tree(record, cid))
+        if shadow_gap is not None:
+            ctx["report"]["anomalies"].append(
+                {"type": "no-shadow-casting-mode", "node": name, "kind": kind,
+                 "reason": shadow_gap})
+        node["extras"]["shadowCastingMode"] = shadow_mode
         mesh_pointer, material_pointers, bones, reason = (
             _renderer_mesh_and_materials(record, cid, kind))
         if not (mesh_pointer or {}).get("m_PathID"):

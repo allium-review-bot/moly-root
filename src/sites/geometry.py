@@ -36,6 +36,7 @@ import struct
 from core.assets.packages import pairs
 from core.gltf import GLB, unity_to_gltf_pos, unity_to_gltf_quat
 from core.mesh import add_mesh, compose_mesh, mesh_accessors
+from core.shader_passes import declared_passes
 
 TRANSFORMS = ("Transform", "RectTransform")
 
@@ -213,7 +214,7 @@ class Textures:
 
 
 def shader_reference(store, record, tree):
-    """The shader a material points at: its family name and its subshader tags.
+    """The shader a material points at: its name, subshader tags and pass tags.
 
     The shader is named and its tags are recorded, but shader code is not
     translated here.  The preview material therefore makes its transparency
@@ -231,6 +232,7 @@ def shader_reference(store, record, tree):
             tags[str(key)] = str(value)
     return {"name": str(parsed.get("m_Name")) if parsed.get("m_Name") else None,
             "package": shader_record.bundle, "tags": tags,
+            "shaderPasses": declared_passes(parsed),
             "fallback": parsed.get("m_FallbackName") or None}
 
 

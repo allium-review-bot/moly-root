@@ -130,6 +130,7 @@ class _Package:
             filter_id = self.add("MeshFilter", filter_tree)
             renderer_id = self.add("MeshRenderer", {
                 "m_GameObject": {"m_FileID": 0, "m_PathID": goid},
+                "m_CastShadows": 1,
                 "m_Materials": [{"m_FileID": 0, "m_PathID": m}
                                 for m in material_ids]})
             comps = [{"component": {"m_FileID": 0, "m_PathID": filter_id}},
@@ -137,6 +138,7 @@ class _Package:
         else:
             renderer_id = self.add("SkinnedMeshRenderer", {
                 "m_GameObject": {"m_FileID": 0, "m_PathID": goid},
+                "m_CastShadows": 1,
                 "m_Mesh": {"m_FileID": 0, "m_PathID": mesh_id},
                 "m_Materials": [{"m_FileID": 0, "m_PathID": m}
                                 for m in material_ids]})
@@ -278,9 +280,11 @@ def test_material_extras_record_shader_passes_and_light_modes(tmp_path,
     pkg.renderer(goid, mesh_id, [mat])
     _run(tmp_path, monkeypatch, {pkg.name: pkg.finish()})
     material = _glb(tmp_path / "out" / f"{pkg.name}.glb")["materials"][0]
+    # renderState is empty for a pass that declares none -- empty is a state
+    # here, not a gap, so the key is present and {} rather than absent.
     assert material["extras"]["shaderPasses"] == [
-        {"name": "Forward", "lightMode": "ForwardBase"},
-        {"name": "ShadowCaster", "lightMode": None},
+        {"name": "Forward", "lightMode": "ForwardBase", "renderState": {}},
+        {"name": "ShadowCaster", "lightMode": None, "renderState": {}},
     ]
     assert material["extras"]["lightModes"] == ["ForwardBase", None]
 
@@ -364,7 +368,7 @@ def test_empty_bundle_root_names_each_unresolved_dependency_shader(tmp_path,
 def test_material_extras_record_shader_keyword_state(tmp_path, monkeypatch):
     """Red when the keyword state is dropped again: a material's serialized
     keyword arrays (``m_ValidKeywords`` / ``m_InvalidKeywords``) and the parsed
-    union must all reach the glb extras -- D67 could only read them by opening
+    union must all reach the glb extras -- a consumer could only read them by opening
     the source bundles because this exporter used to leave them out."""
     pkg = _Package("mysekai__fixture__mdl_keywords")
     goid, _ = pkg.node("furniture")

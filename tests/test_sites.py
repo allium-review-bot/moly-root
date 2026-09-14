@@ -157,7 +157,11 @@ class _Package:
 
 
 def _renderer(material):
-    return ("MeshRenderer", {"m_Enabled": 1,
+    # m_CastShadows rides on every renderer the game ships: 8615 of 8615
+    # renderer objects across all 92 site packages and a spread of 101 fixture
+    # packages serialize it (8606 as 1/On, 9 as 0/Off), none omit it. A corpus
+    # renderer without it is a shape the source does not produce.
+    return ("MeshRenderer", {"m_Enabled": 1, "m_CastShadows": 1,
                              "m_Materials": [{"m_FileID": 0, "m_PathID": material}]})
 
 

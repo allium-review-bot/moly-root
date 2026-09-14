@@ -36,6 +36,7 @@ Three decisions worth naming:
 """
 from core.assets.packages import pairs
 from core.jsonio import write_json
+from core.renderer import shadow_casting_mode_or_gap
 from core.particles import TRAIL_MATERIAL_SLOT, decode_renderer, decode_system
 from . import census
 from .clips import NO_CURVES, clip_document, path_hashes
@@ -174,10 +175,16 @@ def verbatim(store, record, path_id):
 class PackageExtract:
     """One package's artifacts and one package's document."""
 
-    def __init__(self, store, name, out, prefix):
+    def __init__(self, store, name, out, prefix, *, classification=None,
+                 primary_prefab=None):
         self.store = store
         self.name = name
-        self.kind, self.key = census.classify(name)
+        self.kind, self.key = (census.classify(name) if classification is None
+                               else classification)
+        # Non-site prefab domains share the same geometry/material walk. Their
+        # caller supplies identity and an exact container basename; neither is
+        # inferred from the site's naming scheme or the first root in a package.
+        self.primary_prefab = primary_prefab
         self.out = out                       # directory artifacts are written to
         self.prefix = prefix                 # that directory, relative to the index
         self.package = store.package(name)
@@ -321,8 +328,13 @@ class PackageExtract:
             return None, None
         if not renderer.get("m_Enabled", 1):
             self.disabled.append(path)
+        shadow_mode, shadow_gap = shadow_casting_mode_or_gap(renderer)
+        if shadow_gap is not None:
+            self.unsupported.append({"node": path, "component": renderer_kind,
+                                     "reason": shadow_gap})
         entry = {"skinned": renderer_kind == "SkinnedMeshRenderer",
                  "enabled": bool(renderer.get("m_Enabled", 1)),
+                 "shadowCastingMode": shadow_mode,
                  "materialed": has_material,
                  "vertices": vertices, "triangles": triangles}
         if entry["skinned"]:
@@ -393,6 +405,8 @@ class PackageExtract:
                 self.inactive.append(path)
                 node["extras"] = dict(node.get("extras") or {}, active=False)
             if geometry is not None:
+                node["extras"] = dict(node.get("extras") or {},
+                                      shadowCastingMode=geometry["shadowCastingMode"])
                 entry["meshes"] += 1
                 entry["renderers"] += 1
                 entry["vertices"] += geometry["vertices"]
@@ -717,10 +731,20 @@ class PackageExtract:
             self.hashes.update(path_hashes(graph))
             roots = graph.roots
             for transform in roots:
-                is_primary = graph.name(transform) == primary and not any(
-                    entry["primary"] for entry in self.roots)
+                if self.primary_prefab is None:
+                    is_primary = graph.name(transform) == primary and not any(
+                        entry["primary"] for entry in self.roots)
+                else:
+                    is_primary = any(
+                        path.rsplit("/", 1)[-1] == self.primary_prefab
+                        for path in self.asset_paths(record, graph.owner[transform]))
                 self.roots.append(self.root(record, graph, transform, is_primary))
-        if self.roots and not any(entry["primary"] for entry in self.roots):
+        if self.primary_prefab is not None:
+            selected = [entry for entry in self.roots if entry["primary"]]
+            if len(selected) != 1:
+                raise ValueError(f"expected one root for prefab {self.primary_prefab!r} "
+                                 f"in {self.name}, found {len(selected)}")
+        elif self.roots and not any(entry["primary"] for entry in self.roots):
             self.roots[0]["primary"] = True
         if not self.hashes and any(
                 kind == "AnimationClip"

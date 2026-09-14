@@ -215,10 +215,16 @@ def extract_sites(bundles, out_dir, bundle_root=None, master=None, master_cache=
         try:
             document = PackageExtract(store, name, directory, prefix).run()
         except Exception as exc:          # a package that cannot be opened at all
+            # Every key a consumer of a *successful* document reads must be
+            # present here too, empty. A key missing from this skeleton does
+            # not report the failure -- it raises KeyError further down and
+            # buries the reason this package failed, which is the one thing
+            # this branch exists to carry.
             document = {"package": name, "kind": kind, "key": key, "roots": [],
                         "collision": [], "navmesh": [], "materials": [],
                         "textures": [], "components": {}, "particles": [],
-                        "skins": [],
+                        "skins": [], "slots": [], "extraScenes": [],
+                        "environments": {},
                         "geometry": None, "objects": None,
                         "animations": {"clips": []}, "omitted": [],
                         "timelineSockets": [],
