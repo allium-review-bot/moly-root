@@ -1,11 +1,12 @@
-"""Extract the four mysekai master tables whose rows are looked up by key.
+"""Extract registered mysekai master tables whose rows are looked up by key.
 
 ``mysekaiBlueprints``, ``mysekaiItems`` and ``mysekaiMusicRecords`` are each
 keyed by an integer ``id``; ``wordings`` is keyed by the string
-``wordingKey``.  A consumer asks the table for one entry by that key, so the
-product keeps every row under its key rather than as an array a reader would
-have to search.  Nothing is selected or filtered: a row the table states is
-never dropped, a key column that is absent or duplicated is an error rather
+``wordingKey``.  These four remain the default; additional gameplay tables
+are exported only when explicitly selected.  A consumer asks the table for
+one entry by that key, so the product keeps every row under its key rather
+than as an array a reader would have to search.  No rows are filtered from a
+selected table: a key column that is absent or duplicated is an error rather
 than a silent overwrite, and a table with no rows is an error rather than an
 empty product — both states a consumer must be told, not left to infer.
 
@@ -22,6 +23,20 @@ TABLES = {
     "mysekaiMusicRecords": ("id", "mysekai-music-records.json"),
     "wordings": ("wordingKey", "wordings.json"),
 }
+
+OPTIONAL_TABLES = {
+    "mysekaiTools": ("id", "mysekai-tools.json"),
+    "mysekaiStaminas": ("id", "mysekai-staminas.json"),
+    "mysekaiStaminaRecovery": ("id", "mysekai-stamina-recovery.json"),
+    "mysekaiMaterials": ("id", "mysekai-materials.json"),
+    "mysekaiFixturePossessions": ("id", "mysekai-fixture-possessions.json"),
+    "mysekaiMaterialPossessions": ("id", "mysekai-material-possessions.json"),
+    "mysekaiSystemFixtures": ("id", "mysekai-system-fixtures.json"),
+    "mysekaiBlueprintMysekaiMaterialCosts": ("id", "mysekai-blueprint-material-costs.json"),
+    "mysekaiBlueprintTerms": ("id", "mysekai-blueprint-terms.json"),
+}
+
+REGISTERED_TABLES = {**TABLES, **OPTIONAL_TABLES}
 
 _MASKED_URL = "<external-url>"
 
@@ -58,15 +73,24 @@ def _keyed_rows(table, key_field, rows):
     return keyed
 
 
-def extract_master_tables(master_source, out_dir, master_cache=None):
-    """Write one keyed document per table in :data:`TABLES` into *out_dir*.
+def extract_master_tables(master_source, out_dir, master_cache=None, *, tables=None):
+    """Write one keyed document per selected table into *out_dir*.
 
     *master_source* is a directory of master tables or a base URL to fetch
     them from; no bundle is read — these tables live entirely in master.
+    With *tables* omitted, only the original four :data:`TABLES` are written.
+    Otherwise, names must be in :data:`REGISTERED_TABLES`; repeated names are
+    written once, in first-selection order.  Validate all names before reading
+    or writing a table, so an unknown selection cannot leave partial output.
     """
+    selected = tuple(TABLES) if tables is None else tuple(dict.fromkeys(tables))
+    for table in selected:
+        if table not in REGISTERED_TABLES:
+            raise ValueError(f"unregistered master table: {table}")
     master = Master(master_source, cache_dir=master_cache)
     summary = {}
-    for table, (key_field, filename) in TABLES.items():
+    for table in selected:
+        key_field, filename = REGISTERED_TABLES[table]
         rows = master.table(table)
         if not rows:
             raise ValueError(f"{table}: table is empty; a table with no rows "
@@ -83,6 +107,10 @@ def extract_master_tables(master_source, out_dir, master_cache=None):
                     "every row of the table, keyed by the field a consumer "
                     "looks it up by; the source carries no ordering the "
                     "consumer reads, so the map implies none"
+                ) if table in TABLES else (
+                    "every row of the table, keyed by the field a consumer "
+                    "looks it up by; record fields, including any sequence "
+                    "values, are retained verbatim; map order implies none"
                 ),
                 "externalUrls": (
                     "string values that are external http(s) links are "

@@ -17,6 +17,10 @@ ROOT_DOCUMENTS = (
     "mysekai-blueprints.json", "mysekai-fixtures.json", "mysekai-items.json",
     "mysekai-music-records.json", "site-groups.json", "talks.json", "tweets.json",
     "tweet-tables.json", "wordings.json",
+    "mysekai-tools.json", "mysekai-staminas.json", "mysekai-stamina-recovery.json",
+    "mysekai-materials.json", "mysekai-fixture-possessions.json",
+    "mysekai-material-possessions.json", "mysekai-system-fixtures.json",
+    "mysekai-blueprint-material-costs.json", "mysekai-blueprint-terms.json",
 )
 ASSET_DIRECTORIES = (
     "avatar", "avatar-parts", "camera", "cutscene-timeline", "emoticons", "fixture-areas",

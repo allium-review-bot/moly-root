@@ -36,6 +36,17 @@ UNIT_GROUP_SLOTS = 5                     # gameCharacterUnitId1..5
 BGM_TABLES = ("mysekaiPhenomenaBgms", "mysekaiSiteBgms")
 AMBIENCE_TABLE = "mysekaiSiteMysekaiPhenomenaSounds"
 
+# These payload fields hold one record, not an array.  Keep the complete record
+# as one row for table consumers; other objects may instead be wrappers or
+# column-oriented compact tables and must not be interpreted as records.
+_SINGLE_RECORD_TABLES = frozenset({
+    "mysekaiColorfulPass",
+    "mysekaiConvertFixtureSlot",
+    "mysekaiFixtureGameCharacterPerformanceBonusLimit",
+    "mysekaiSiteHousingPreset",
+    "mysekaiStaminaRecovery",
+})
+
 
 class MissingTable(LookupError):
     """A required master table is not in the supplied directory."""
@@ -82,12 +93,34 @@ class Master:
         return rows
 
     def table(self, name):
-        """Rows of one table; raises when it is absent rather than returning []."""
+        """Object rows in source order, including an explicitly empty table.
+
+        A missing table raises.  Arrays and row-array wrappers retain their
+        rows; known single-record payloads become one-element arrays.  Compact
+        column objects and other unsupported shapes are not guessed at.
+        """
         if name not in self._cache:
             rows = (self._read_remote(name) if self.remote
                     else self._read_local(os.path.join(self.source, f"{name}.json"), name))
-            if isinstance(rows, dict):                 # some dumps wrap the array
-                rows = rows.get("data") or next(iter(rows.values()), [])
+            if isinstance(rows, dict):
+                if not rows:
+                    rows = []
+                elif "data" in rows:
+                    rows = rows["data"]
+                elif name in _SINGLE_RECORD_TABLES:
+                    rows = [rows]
+                elif len(rows) == 1:
+                    rows = next(iter(rows.values()))
+                else:
+                    raise ValueError(f"{name}: unsupported table object; expected "
+                                     "a row-array wrapper or a known single record")
+            if not isinstance(rows, list):
+                raise ValueError(f"{name}: expected an array of object rows, "
+                                 f"got {type(rows).__name__}")
+            for index, row in enumerate(rows):
+                if not isinstance(row, dict):
+                    raise ValueError(f"{name}: row {index} is "
+                                     f"{type(row).__name__}, expected an object")
             self._cache[name] = rows
         return self._cache[name]
 
