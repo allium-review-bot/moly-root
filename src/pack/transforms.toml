@@ -6,8 +6,9 @@
 # produced bytes and the manifest description of them change together.
 #
 # `tool` / `tool_version` / `params` mirror manifest.schema.json's
-# meshoptRecipe $def exactly -- see F:\mysekai\moly\moly\web\manifest.schema.json
-# (read-only, authoritative). The six `params` keys are all required there;
+# meshoptRecipe $def exactly. That schema lives in the consumer project, not
+# here, and it is authoritative for the shape: the six `params` keys are all
+# required there;
 # the three quantize_* widths are 1..16, the three switches are booleans.
 #
 # weld / simplify / reorder are false: this recipe only snaps existing vertex

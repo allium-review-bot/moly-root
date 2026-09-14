@@ -32,18 +32,38 @@ import { createRequire } from 'node:module';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TRANSFORMS_TOML = path.join(HERE, 'transforms.toml');
 
-// This repo (moly-root) has no node_modules of its own for @gltf-transform/*
-// or meshoptimizer, and no network access is assumed here. Those npm
-// packages are already installed (and already proven to work for this exact
-// quantize + EXT_meshopt_compression path) at F:/mysekai/moly/_work/quant,
-// alongside run_quant.js. ESM `import` does not consult NODE_PATH, so a
-// plain `import '@gltf-transform/core'` from this file's own directory would
-// not find them; `createRequire` with a synthetic base path inside that
+// This repo vendors no node_modules for @gltf-transform/* or meshoptimizer and
+// assumes no network access, so where those packages live is an input, not a
+// constant. The directories below are searched in order and the first one
+// holding a node_modules wins; MOLY_QUANT_DIR names one explicitly.
+//
+// ESM `import` does not consult NODE_PATH, so a plain
+// `import '@gltf-transform/core'` from this file's own directory would not
+// find them; `createRequire` with a synthetic base path inside the chosen
 // directory runs Node's classic (NODE_PATH-agnostic) CJS resolution instead,
-// which walks up from the given path looking for node_modules -- finding it
-// immediately, since the base path IS that directory. This reads the
-// packages installed there; it does not import run_quant.js itself.
-const QUANT_DIR = 'F:/mysekai/moly/_work/quant';
+// which walks up from that path looking for node_modules -- finding it
+// immediately, since the base path IS that directory.
+const REPO_ROOT = path.join(HERE, '..', '..');
+const QUANT_CANDIDATES = [
+  process.env.MOLY_QUANT_DIR,
+  REPO_ROOT,
+  path.join(REPO_ROOT, '_work', 'quant'),
+  path.join(REPO_ROOT, '..', '_work', 'quant'),
+].filter(Boolean);
+
+const QUANT_DIR = QUANT_CANDIDATES.find(
+  (dir) => fs.existsSync(path.join(dir, 'node_modules')));
+
+// Refuse by name rather than let `createRequire` fail on a path that only one
+// machine has: the caller needs to know which packages are wanted and where
+// this looked, and a module-resolution stack trace says neither.
+if (!QUANT_DIR) {
+  throw new Error(
+    'glTF transform dependencies not found. Install @gltf-transform/core, '
+    + '@gltf-transform/extensions, @gltf-transform/functions and meshoptimizer '
+    + 'into one directory and name that directory in MOLY_QUANT_DIR. '
+    + `Searched: ${QUANT_CANDIDATES.join(', ')}`);
+}
 const requireFromQuant = createRequire(path.join(QUANT_DIR, 'noop.cjs'));
 
 const { NodeIO } = requireFromQuant('@gltf-transform/core');
@@ -165,7 +185,7 @@ async function main() {
   // directory that ever holds real files on Windows.
   if (!fs.existsSync(srcRoot) || !fs.statSync(srcRoot).isDirectory()) {
     throw new Error(
-      `--src is not a directory: ${srcRoot} (pass a drive-qualified path such as F:/... or F:\\..., ` +
+      `--src is not a directory: ${srcRoot} (pass an absolute, drive-qualified path, ` +
       `not an MSYS-style /f/... path -- the latter resolves to nothing on Windows without raising)`);
   }
 
