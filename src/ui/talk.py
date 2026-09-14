@@ -259,9 +259,9 @@ def decode_tweetheadupdisplay(r: Reader):
 
 
 def decode_verticallayoutgroup(r: Reader):
-    """VerticalLayoutGroup 序列化字段（F5-3 §4）：Padding Vector4 + ChildAlignment int + Spacing float + 7 bool。"""
+    """VerticalLayoutGroup: RectOffset (left/right/top/bottom i32), alignment, spacing and seven bools."""
     d = {}
-    d["m_Padding"] = r.vec4()
+    d["m_Padding"] = [r.i32() for _ in range(4)]
     d["m_ChildAlignment"] = r.i32()
     d["m_Spacing"] = r.f32()
     d["m_ChildForceExpandWidth"] = r.bool4()
@@ -285,7 +285,7 @@ def decode_contentsizefitter(r: Reader):
 def decode_layoutgroup(r: Reader):
     """通用 LayoutGroup 基类（HOVLG 之前的部分）：m_Padding + m_ChildAlignment。"""
     d = {}
-    d["m_Padding"] = r.vec4()
+    d["m_Padding"] = [r.i32() for _ in range(4)]
     d["m_ChildAlignment"] = r.i32()
     return d
 

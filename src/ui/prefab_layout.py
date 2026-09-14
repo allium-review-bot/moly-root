@@ -13,8 +13,8 @@ so a consumer knows which half of a screen comes from where.
 
 MonoBehaviours in the player data ship without typetrees, so every game
 component is hand-decoded along the declaration order the managed types fix
-(the rule ``ui.talk`` established; the decoders live there and three more are
-added here for the components these screens actually use).  A hand decode is
+(the rule ``ui.talk`` established; the shared decoders live there and the
+screen-specific decoders live here).  A hand decode is
 only trusted when it consumes its object exactly -- a nonzero residual fails
 the extraction rather than writing a half-truth.
 
@@ -27,6 +27,8 @@ per the scope rule), instead of mistaking the placeholder for content.
 from __future__ import annotations
 
 import struct
+import math
+import hashlib
 import warnings
 from pathlib import Path
 
@@ -57,6 +59,8 @@ SCREENS = {
              "UIPartsDialogFillCover"),
     "hud": ("ScreenLayerMysekaiHUD", "ScreenLayerMysekaiSiteMove",
             "MysekaiWeatherDialog"),
+    "shell": ("ScreenLayerMysekaiHome", "ScreenLayerMysekaiMyRoom",
+              "ScreenLayerMysekaiHarvest", "ScreenLayerMysekaiDelivery"),
 }
 
 # How each family is fetched at runtime; stated per name because it is the
@@ -65,6 +69,7 @@ LOADING = {
     "info": 'Resources.Load("Screen/Prefabs/ScreenLayerMysekaiInfo")',
     "menu": 'Resources.Load("Dialog/" + dialogType.ToString())',
     "hud": 'Resources.Load("Screen/Prefabs/…") / "Dialog/…" per name',
+    "shell": 'Resources.Load("Screen/Prefabs/" + layerData.name)',
 }
 
 SEMANTICS = {
@@ -100,11 +105,14 @@ RUNTIME_VALUES = {
     "hud": ["UserMysekaiPhenomenaSchedules (weather cells)",
             "UserResource (HUD resource bar)",
             "stamina value (HUD MysekaiStaminaView)"],
+    "shell": ["MysekaiMenuUIContent.ContentData (site/owner and UI callbacks)",
+              "MysekaiMissionHomePanel (current mission state)",
+              "site-specific action availability (runtime state)"],
 }
 
 
 # ---------------------------------------------------------------------------
-# The three decoders these screens need beyond ui.talk's registry.
+# The screen-specific decoders these prefabs need beyond ui.talk's registry.
 # Declaration order fixed by the managed types; a decode must end exactly.
 # ---------------------------------------------------------------------------
 
@@ -168,10 +176,117 @@ def decode_menu_dialog_cell(r: talk.Reader) -> dict:
     return d
 
 
+def decode_mysekai_info_page(r: talk.Reader) -> dict:
+    """ScreenLayerMysekaiInfoPage: the two serialized CanvasGroup references."""
+    return {name: r.pptr() for name in ("_leftCanvasGroups", "_rightCanvasGroups")}
+
+
+def decode_mysekai_stamina_view(r: talk.Reader) -> dict:
+    """MysekaiStaminaView: eight serialized component references, in order."""
+    return {name: r.pptr() for name in (
+        "_staminaGageImageOnStock", "_staminaGageImageOnNoStock",
+        "_staminaGageImage", "_staminaDecreaseGageImage", "_staminaIcon",
+        "_staminaGradiantImage", "_boostStaminaCount", "_canvasGroup",
+    )}
+
+
+def decode_mysekai_menu_ui_content(r: talk.Reader) -> dict:
+    """MysekaiMenuUIContent: serialized references, excluding runtime state."""
+    return {name: r.pptr() for name in (
+        "_siteMapButton", "_leaveMysekaiButton", "_homeAreaInfo",
+        "_siteNameIconImage", "_screenShotButton", "_screenShotButtonCanvasGroup",
+        "_screenShotUx", "_cameraResetButton", "_menuButton", "_uiDisableButton",
+        "_uiDisableButtonCanvasGroup", "_sekaiMissionHomePanel",
+        "_uiDisableButtonOnPosition", "_uiDisableButtonOffPosition",
+        "_screenShotButtonOnPosition", "_screenShotButtonOffPosition", "_backButton",
+    )}
+
+
+def decode_mysekai_custom_button(r: talk.Reader) -> dict:
+    """MysekaiCustomButton wraps one serialized CustomButton reference."""
+    return {"_button": r.pptr()}
+
+
+def decode_soft_mask(r: talk.Reader) -> dict:
+    """SoftMask: Mask's serialized flag, then the seven SoftMask fields."""
+    return {
+        "m_ShowMaskGraphic": r.bool4(),
+        "m_DownSamplingRate": r.i32(),
+        "m_Softness": r.f32(),
+        "m_Alpha": r.f32(),
+        "m_IgnoreParent": r.bool4(),
+        "m_PartOfParent": r.bool4(),
+        "m_IgnoreSelfGraphic": r.bool4(),
+        "m_IgnoreSelfStencil": r.bool4(),
+    }
+
+
+def decode_canvas_scaler(r: talk.Reader) -> dict:
+    """CanvasScaler's serialized chain; ScreenCanvasScaler adds no fields."""
+    return {
+        "m_UiScaleMode": r.i32(),
+        "m_ReferencePixelsPerUnit": r.f32(),
+        "m_ScaleFactor": r.f32(),
+        "m_ReferenceResolution": r.vec2(),
+        "m_ScreenMatchMode": r.i32(),
+        "m_MatchWidthOrHeight": r.f32(),
+        "m_PhysicalUnit": r.i32(),
+        "m_FallbackScreenDPI": r.f32(),
+        "m_DefaultSpriteDPI": r.f32(),
+        "m_DynamicPixelsPerUnit": r.f32(),
+        "m_PresetInfoIsWorld": r.bool4(),
+    }
+
+
+def decode_tmp_settings(r: talk.Reader) -> dict:
+    """TMP_Settings in declaration order, including the two TextAsset refs.
+
+    LineBreakingTable contains dictionaries, which Unity does not serialize;
+    it contributes no bytes between the TextAsset refs and the Hangul flag.
+    """
+    d = {name: r.bool4() for name in (
+        "m_enableWordWrapping", "m_enableKerning", "m_enableExtraPadding",
+        "m_enableTintAllSprites", "m_enableParseEscapeCharacters",
+        "m_EnableRaycastTarget", "m_GetFontFeaturesAtRuntime",
+    )}
+    d["m_missingGlyphCharacter"] = r.i32()
+    d["m_warningsDisabled"] = r.bool4()
+    d["m_defaultFontAsset"] = r.pptr()
+    d["m_defaultFontAssetPath"] = r.string()
+    for name in ("m_defaultFontSize", "m_defaultAutoSizeMinRatio",
+                 "m_defaultAutoSizeMaxRatio"):
+        d[name] = r.f32()
+    d["m_defaultTextMeshProTextContainerSize"] = r.vec2()
+    d["m_defaultTextMeshProUITextContainerSize"] = r.vec2()
+    d["m_autoSizeTextContainer"] = r.bool4()
+    d["m_IsTextObjectScaleStatic"] = r.bool4()
+    d["m_fallbackFontAssets"] = talk.decode_pptr_list(r)
+    d["m_matchMaterialPreset"] = r.bool4()
+    d["m_defaultSpriteAsset"] = r.pptr()
+    d["m_defaultSpriteAssetPath"] = r.string()
+    d["m_enableEmojiSupport"] = r.bool4()
+    d["m_MissingCharacterSpriteUnicode"] = r.u32()
+    d["m_defaultColorGradientPresetsPath"] = r.string()
+    d["m_defaultStyleSheet"] = r.pptr()
+    d["m_StyleSheetsResourcePath"] = r.string()
+    d["m_leadingCharacters"] = r.pptr()
+    d["m_followingCharacters"] = r.pptr()
+    d["m_UseModernHangulLineBreakingRules"] = r.bool4()
+    return d
+
+
 EXTRA_DECODERS = {
     "Sekai.UI.CustomRawImage": decode_raw_image_base,
     "Sekai.UI.CustomToggle": decode_custom_toggle,
     "Sekai.MenuDialogCell": decode_menu_dialog_cell,
+    "Sekai.Mysekai.MysekaiStaminaView": decode_mysekai_stamina_view,
+    "Sekai.Mysekai.ScreenLayerMysekaiInfoPage": decode_mysekai_info_page,
+    "Sekai.Mysekai.MysekaiMenuUIContent": decode_mysekai_menu_ui_content,
+    "Sekai.Mysekai.MysekaiCustomButton": decode_mysekai_custom_button,
+    "Coffee.UISoftMask.SoftMask": decode_soft_mask,
+    "UnityEngine.UI.CanvasScaler": decode_canvas_scaler,
+    "Sekai.ScreenCanvasScaler": decode_canvas_scaler,
+    "TMPro.TMP_Settings": decode_tmp_settings,
 }
 
 
@@ -242,20 +357,81 @@ class Resolver:
                              atlas=(tree.get("m_AtlasTags") or [""])[0])
                 entry["border"] = [float(tree.get("m_Border", {}).get(k, 0))
                                    for k in ("x", "y", "z", "w")]
-                entry["pixelsPerUnit"] = float(tree.get("m_PixelsToUnits", 100))
+                rect = tree["m_Rect"]
+                entry["rect"] = [float(rect[k]) for k in ("x", "y", "width", "height")]
+                entry["rectSize"] = entry["rect"][2:]
+                ppu = float(tree["m_PixelsToUnits"])
+                if not math.isfinite(ppu) or ppu <= 0:
+                    raise ValueError(f"Sprite {pid} has invalid pixels per unit: {ppu}")
+                entry["pixelsPerUnit"] = ppu
+                entry["pixelContract"] = {
+                    "serializedFile": obj.assets_file.name,
+                    "spriteRect": "rect/rectSize are the original Sprite.rect, in pixels",
+                    "imageSize": "size is the exported cropped image, not Sprite.rect",
+                }
+                # Match SpriteHelper's atlas selection, preserving the actual
+                # render-data texture/trim contract instead of m_RD's empty ref.
+                sprite_data = obj.read()
+                render_data = tree["m_RD"]
+                atlas_ptr = sprite_data.m_SpriteAtlas
+                atlas_data = None
+                if atlas_ptr:
+                    atlas_data = atlas_ptr.deref_parse_as_object()
+                elif sprite_data.m_AtlasTags:
+                    atlas_objects = (o for o in self.objects.values()
+                                     if o.type.name == "SpriteAtlas"
+                                     and o.peek_name() == sprite_data.m_AtlasTags[0])
+                    atlas_obj = next(atlas_objects, None)
+                    if atlas_obj is not None:
+                        atlas_data = atlas_obj.read()
+                if atlas_data is not None:
+                    matches = [data for key, data in atlas_data.m_RenderDataMap
+                               if key == sprite_data.m_RenderDataKey]
+                    if len(matches) != 1:
+                        raise ValueError(f"Sprite {pid} has {len(matches)} atlas render entries")
+                    rd = matches[0]
+                    render_data = {
+                        "texture": {"m_FileID": rd.texture.file_id,
+                                    "m_PathID": rd.texture.path_id},
+                        "textureRect": {k: getattr(rd.textureRect, k)
+                                        for k in ("x", "y", "width", "height")},
+                        "textureRectOffset": {k: getattr(rd.textureRectOffset, k)
+                                              for k in ("x", "y")},
+                        "settingsRaw": rd.settingsRaw,
+                    }
+                entry["textureRect"] = [float(render_data["textureRect"][k])
+                                        for k in ("x", "y", "width", "height")]
+                entry["textureRectOffset"] = [float(render_data["textureRectOffset"][k])
+                                              for k in ("x", "y")]
+                entry["packingSettingsRaw"] = int(render_data["settingsRaw"])
+                texture_ref = render_data["texture"]
+                entry["pixelContract"]["texturePPtr"] = [texture_ref["m_FileID"],
+                                                          texture_ref["m_PathID"]]
                 if self.image_dir is not None:
                     from UnityPy.export import SpriteHelper
-                    image = SpriteHelper.get_image_from_sprite(obj.read())
+                    image = SpriteHelper.get_image_from_sprite(sprite_data)
                     self.image_dir.mkdir(parents=True, exist_ok=True)
                     filename = f"sprite-{pid}.png"
                     image.save(self.image_dir / filename)
                     entry["image"] = "textures/" + filename
                     entry["size"] = list(image.size)
-                tex_pid = ((tree.get("m_RD") or {}).get("texture")
-                           or {}).get("m_PathID", 0)
-                entry["texture"] = self.texture_name(tex_pid)
+                if texture_ref["m_FileID"] != 0:
+                    entry["texture"] = {"fileId": texture_ref["m_FileID"],
+                                        "pathId": texture_ref["m_PathID"], "state": "external"}
+                else:
+                    # A cropped sprite already supplies its image.  Keep the
+                    # original texture identity without exporting an extra atlas.
+                    entry["texture"] = self.texture_metadata(texture_ref["m_PathID"])
         self._sprite_cache[key] = entry
         return entry
+
+    def texture_metadata(self, pid: int) -> dict:
+        tree = self._tree(pid)
+        obj = self.objects.get(pid)
+        if tree is None or obj is None or obj.type.name != "Texture2D":
+            return {"pathId": pid, "state": "unresolved"}
+        return {"pathId": pid, "state": "ok", "name": tree["m_Name"],
+                "size": [tree["m_Width"], tree["m_Height"]]}
 
     def texture_name(self, pid: int) -> dict:
         if pid in self._texture_cache:
@@ -320,6 +496,176 @@ class Resolver:
 # Layout extraction
 # ---------------------------------------------------------------------------
 
+def _source_object(env, owner, pointer, tables):
+    """Resolve one serialized PPtr using its owner's external-file table."""
+    if isinstance(pointer, dict):
+        fid, pid = pointer["m_FileID"], pointer["m_PathID"]
+    else:
+        fid, pid = pointer
+    if not pid:
+        raise ValueError("required source reference is null")
+    name = owner.assets_file.name
+    if fid:
+        if not 1 <= fid <= len(owner.assets_file.externals):
+            raise ValueError(f"invalid external file id {fid} in {name}")
+        name = owner.assets_file.externals[fid - 1].name
+    if name not in tables:
+        tables[name] = talk.objects_by_file(env, name)
+    if pid not in tables[name]:
+        raise ValueError(f"source object not found: {name}:{pid}")
+    return tables[name][pid]
+
+
+def _strict_fields(env, obj, mono_index, expected_class):
+    record = talk.decode_object(env, obj, mono_index)
+    if (record["class"] != expected_class or not record.get("hand_decoded")
+            or record["residual"] != 0):
+        raise ValueError(f"invalid {expected_class} source object {obj.path_id}")
+    return record
+
+
+def extract_text_settings(env, mono_index):
+    """Follow the actual Resources index to TMP Settings and its TextAssets.
+
+    Duplicate load-name entries must agree on the requested line-breaking
+    subset. Different rule data is an ambiguity, never an arbitrary choice.
+    """
+    tables = {}
+    managers = (obj for obj in talk.objects_by_file(env, "globalgamemanagers").values()
+                if obj.type.name == "ResourceManager")
+    settings_objects = {}
+    resource_sources = []
+    for manager in managers:
+        for name, pointer in manager.read_typetree()["m_Container"]:
+            if name.casefold() != "tmp settings":
+                continue
+            obj = _source_object(env, manager, pointer, tables)
+            settings_objects[(obj.assets_file.name, obj.path_id)] = obj
+            resource_sources.append({"serializedFile": manager.assets_file.name,
+                                     "pathId": manager.path_id, "key": name,
+                                     "target": pointer})
+    if not settings_objects:
+        raise ValueError("TMP Settings resource entry not found")
+    result = None
+    sources = []
+    for obj in settings_objects.values():
+        record = _strict_fields(env, obj, mono_index, "TMPro.TMP_Settings")
+        fields = record["fields"]
+        values = {"useModernHangulLineBreakingRules":
+                  fields["m_UseModernHangulLineBreakingRules"]}
+        text_sources = {}
+        for field, output in (("m_leadingCharacters", "leadingCharacters"),
+                              ("m_followingCharacters", "followingCharacters")):
+            text = _source_object(env, obj, fields[field], tables)
+            if text.type.name != "TextAsset":
+                raise ValueError(f"{field} does not reference a TextAsset")
+            tree = text.read_typetree()
+            content = tree["m_Script"]
+            if isinstance(content, bytes):
+                content = content.decode("utf-8")
+            if not isinstance(content, str):
+                raise ValueError(f"{field} has non-text content")
+            values[output] = content
+            text_sources[output] = {
+                "serializedFile": text.assets_file.name, "pathId": text.path_id,
+                "name": tree["m_Name"],
+                "rawSha256": hashlib.sha256(text.get_raw_data()).hexdigest(),
+            }
+        if result is not None and values != result:
+            raise ValueError("TMP Settings resource entries disagree on line-breaking rules")
+        result = values
+        sources.append({"serializedFile": obj.assets_file.name,
+                        "pathId": obj.path_id, "rawLength": record["raw_len"],
+                        "residual": record["residual"], "textAssets": text_sources})
+    return {"version": 1, **result,
+            "source": {"resourceEntries": resource_sources, "settings": sources,
+                       "contentPolicy": "verbatim TextAsset strings, including BOM"}}
+
+
+def extract_host_canvas(env, mono_index):
+    """The Mysekai scene's actual ScreenManager/CanvasRoot scaler contract.
+
+    This is an explicit host input, not a fabricated per-prefab ancestor.
+    Nested Canvas native getter inheritance is not inferred from serialization.
+    """
+    global_objects = talk.objects_by_file(env, "globalgamemanagers")
+    settings = [obj for obj in global_objects.values() if obj.type.name == "BuildSettings"]
+    if len(settings) != 1:
+        raise ValueError("expected one BuildSettings for the scene index")
+    scenes = settings[0].read_typetree()["scenes"]
+    matches = [(index, path) for index, path in enumerate(scenes)
+               if path.replace("\\", "/").rsplit("/", 1)[-1] == "Mysekai.unity"]
+    if len(matches) != 1:
+        raise ValueError("Mysekai scene is absent or ambiguous in BuildSettings")
+    scene_index, scene_path = matches[0]
+    scene_file = f"level{scene_index}"
+    objects = talk.objects_by_file(env, scene_file)
+    managers = [obj for obj in objects.values()
+                if obj.type.name == "MonoBehaviour"
+                and talk.resolve_script_class(obj, mono_index) == "Sekai.ScreenManager"]
+    if len(managers) != 1:
+        raise ValueError(f"expected one ScreenManager in {scene_file}")
+    manager = managers[0]
+    reader = talk.Reader(manager.get_raw_data())
+    prefix = talk.unpack_mb_prefix(reader)
+    go_ref = prefix["m_GameObject"]
+    if go_ref[0] != 0:
+        raise ValueError("ScreenManager GameObject is external")
+    go = objects[go_ref[1]].read_typetree()
+    components = [objects[item["component"]["m_PathID"]] for item in go["m_Component"]]
+    canvases = [obj for obj in components if obj.type.name == "Canvas"]
+    transforms = [obj for obj in components if obj.type.name == "RectTransform"]
+    scalers = [obj for obj in components if obj.type.name == "MonoBehaviour"
+               and talk.resolve_script_class(obj, mono_index) == "Sekai.ScreenCanvasScaler"]
+    if len(canvases) != 1 or len(transforms) != 1 or len(scalers) != 1:
+        raise ValueError("ScreenManager lacks a unique Canvas/RectTransform/ScreenCanvasScaler")
+    canvas, transform, scaler = canvases[0], transforms[0], scalers[0]
+    scaler_record = _strict_fields(env, scaler, mono_index, "Sekai.ScreenCanvasScaler")
+    fields = scaler_record["fields"]
+    frame = transform.read_typetree()
+    canvas_fields = canvas.read_typetree()
+    if (frame["m_Father"]["m_PathID"] != 0 or not prefix["m_Enabled"]
+            or not scaler_record["meta"]["m_Enabled"] or not go["m_IsActive"]
+            or not canvas_fields["m_Enabled"]):
+        raise ValueError("Mysekai host is not an enabled root Canvas")
+    if fields["m_UiScaleMode"] != 1 or canvas_fields["m_RenderMode"] == 2:
+        raise ValueError("Mysekai host reference PPU requires a different scaler mode")
+    ppu = fields["m_ReferencePixelsPerUnit"]
+    if not math.isfinite(ppu) or ppu <= 0:
+        raise ValueError("Mysekai host reference PPU is invalid")
+    layers = []
+    for pointer in frame["m_Children"]:
+        child = objects[pointer["m_PathID"]]
+        child_frame = child.read_typetree()
+        child_go_id = child_frame["m_GameObject"]["m_PathID"]
+        child_go = objects[child_go_id].read_typetree()
+        if child_go["m_Name"] not in ("Layer_UI", "Layer_Dialog"):
+            continue
+        child_canvases = [objects[item["component"]["m_PathID"]]
+                          for item in child_go["m_Component"]
+                          if objects[item["component"]["m_PathID"]].type.name == "Canvas"]
+        if len(child_canvases) != 1:
+            raise ValueError("display layer has no unique Canvas")
+        layers.append({"name": child_go["m_Name"], "gameObjectPathId": child_go_id,
+                       "transformPathId": child.path_id,
+                       "canvasPathId": child_canvases[0].path_id,
+                       "canvasFields": child_canvases[0].read_typetree()})
+    if {layer["name"] for layer in layers} != {"Layer_UI", "Layer_Dialog"}:
+        raise ValueError("Mysekai display-layer hosts are missing")
+    return {
+        "version": 1, "referencePixelsPerUnit": ppu,
+        "source": {"scene": scene_path, "serializedFile": scene_file,
+                   "buildSettingsPathId": settings[0].path_id,
+                   "rootGameObjectPathId": go_ref[1], "rootTransformPathId": transform.path_id,
+                   "rootCanvasPathId": canvas.path_id, "screenManagerPathId": manager.path_id,
+                   "scalerPathId": scaler.path_id, "scalerRawLength": scaler_record["raw_len"],
+                   "scalerResidual": scaler_record["residual"]},
+        "scalerFields": fields, "rootCanvasFields": canvas_fields, "layers": layers,
+        "scope": ("explicit Mysekai CanvasRoot scaler input; no assertion that every "
+                  "nested Canvas native getter inherits this value"),
+    }
+
+
 def _pptr(value):
     """A decoded PPtr tuple as JSON-able [fileId, pathId]."""
     return [value[0], value[1]] if isinstance(value, tuple) else value
@@ -358,7 +704,7 @@ def _component_record(env, obj, resolver):
     # Reference resolution per component family.
     if cls in ("Sekai.UI.CustomImage", "Sekai.AtlasImage", "UnityEngine.UI.Image"):
         sprite = fields.get("m_Sprite")
-        if sprite and sprite[1]:
+        if sprite is not None:
             out["sprite"] = resolver.sprite(sprite)
         if fields.get("atlas") and fields["atlas"][1]:
             ref = resolver.atlas_name(fields["atlas"])
@@ -629,11 +975,13 @@ def census_bundles(bundles_root, bundle_manifest=None) -> dict:
 # ---------------------------------------------------------------------------
 
 def extract_layout(player_data: str, out_dir, bundles_root=None,
-                   bundle_manifest=None) -> dict:
+                   bundle_manifest=None, *, prefabs=None) -> dict:
     """Write one layout document per target prefab plus the census.
 
-    Returns the counts the caller reports.  Every hand decode that does not
-    end exactly raises, so a document on disk means its whole tree decoded.
+    ``prefabs`` optionally selects exact names from SCREENS; unknown names
+    fail before any output is written.  A targeted run omits the broad census.
+    Returns the counts the caller reports.  Every registered hand decode must
+    end exactly; unknown components remain explicitly partial in the document.
     """
     if not player_data:
         raise ValueError("player data path is required (the layout lives in "
@@ -641,6 +989,10 @@ def extract_layout(player_data: str, out_dir, bundles_root=None,
     pd = Path(player_data)
     if not pd.is_file():
         raise FileNotFoundError(f"player data not found: {player_data}")
+    selected = None if prefabs is None else set(prefabs)
+    known = {name for names in SCREENS.values() for name in names}
+    if selected is not None and (not selected or selected - known):
+        raise ValueError(f"invalid prefab selection: {sorted(selected - known)}")
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -651,9 +1003,13 @@ def extract_layout(player_data: str, out_dir, bundles_root=None,
     mono_index = talk.build_monoscript_index(env)
 
     talk._DECODERS.update(EXTRA_DECODERS)
+    text_settings = extract_text_settings(env, mono_index)
+    host_canvas = extract_host_canvas(env, mono_index)
+    write_json(out / "text-settings.json", text_settings)
+    write_json(out / "host-canvas.json", host_canvas)
     resolver = Resolver(objects, mono_index, out / "textures")
     runtime_textures = {}
-    if bundles_root:
+    if bundles_root and (selected is None or "MysekaiMenuDialog" in selected):
         package = Path(bundles_root) / "mysekai__ui__mysekai_menu"
         if not package.is_file():
             raise FileNotFoundError(f"UI texture bundle missing: {package.name}")
@@ -665,11 +1021,14 @@ def extract_layout(player_data: str, out_dir, bundles_root=None,
             relative = f"textures/menu-{obj.path_id}.png"
             texture.image.save(out / relative)
             runtime_textures[texture.m_Name] = relative
-    write_json(out / "textures.json", runtime_textures)
+    if selected is None or runtime_textures:
+        write_json(out / "textures.json", runtime_textures)
 
     written, failures = [], []
     for family, prefabs in SCREENS.items():
         for prefab in prefabs:
+            if selected is not None and prefab not in selected:
+                continue
             roots = find_prefab_root(objects, prefab)
             if len(roots) != 1:
                 failures.append({"prefab": prefab, "family": family,
@@ -683,12 +1042,16 @@ def extract_layout(player_data: str, out_dir, bundles_root=None,
                             "path": str(path),
                             "summary": document["summary"]})
 
-    census = {"playerData": census_player_data(objects)}
-    if bundles_root:
+    census = {}
+    if selected is None:
+        census["playerData"] = census_player_data(objects)
+    if bundles_root and selected is None:
         census["bundles"] = census_bundles(bundles_root, bundle_manifest)
     census["targets"] = [{"prefab": w["prefab"], "family": w["family"]}
                          for w in written]
-    census_path = write_json(out / "census.json", census)
+    # A selected subset must not replace an existing full census.
+    census_path = write_json(out / ("census.json" if selected is None
+                                   else "selection.json"), census)
 
     return {"written": written, "failures": failures,
             "census": census, "censusPath": str(census_path)}
