@@ -59,6 +59,7 @@ from perf.animations import (
     curve_accounting,
     decode_clip,
 )
+from sites.clips import _events
 from .emoticons import _material, _pairs, _shader_name
 
 # examples/viewer/segments.js:3-5 (accepted demo, not a true-source citation):
@@ -149,6 +150,31 @@ def _clip_frame_info(tree):
         duration = stop_time - start_time
         frame_count = round(duration * sample_rate) + 1
     return sample_rate, duration, frame_count
+
+
+def _clip_playback_metadata(tree):
+    """Verbatim event commands and the clip's authored loop flag.
+
+    The event bodies use the site-clip convention, including every parameter
+    slot and object-reference identity. Event function names, not their integer
+    arguments, determine which command a consumer dispatches. Object parameter
+    names remain unresolved here; their file/path ids are retained unchanged.
+
+    An empty event list and a false loop flag are authored values. Missing
+    fields instead stay null and carry their source-field names, so neither
+    absence nor a clip-name suffix can silently become playback behavior.
+    """
+    missing = []
+    events = None
+    if tree.get("m_Events") is None:
+        missing.append("m_Events")
+    else:
+        events = _events(tree)
+    loop_time = (tree.get("m_MuscleClip") or {}).get("m_LoopTime")
+    if loop_time is None:
+        missing.append("m_MuscleClip.m_LoopTime")
+    return {"events": events, "loopTime": loop_time,
+            "playbackMetadataMissing": missing}
 
 
 # --- player body mesh (SkinnedMeshRenderer) --------------------------------
@@ -559,6 +585,10 @@ def export_player_avatar(bundle_paths, out_dir, name="mysekai__player_avatar"):
       ``durationSeconds`` and ``frameCount`` -- none of which
       ``export_package`` records, since a single-package caller already knows
       its own package's naming convention.
+    - ``events`` and ``loopTime`` preserve each clip's authored playback
+      metadata, independently of curve decoding and phase-name grouping.
+      ``playbackMetadataMissing`` names any absent source fields; null is
+      distinct from no events or a non-looping clip.
     - ``counts.harvest``: how many exported clips have a harvest container.
     - ``playerMesh``: ``{"meshes", "skins", "vertexCount", "joints",
       "materialName", "textures"}`` for the body's ``SkinnedMeshRenderer``
@@ -616,6 +646,7 @@ def export_player_avatar(bundle_paths, out_dir, name="mysekai__player_avatar"):
             "phaseBase": base, "phase": phase,
             "sampleRate": sample_rate, "durationSeconds": duration,
             "frameCount": frame_count,
+            **_clip_playback_metadata(tree),
         }
         try:
             curves, channels, anomalies = decode_clip(tree, hierarchy)
@@ -757,6 +788,8 @@ def write_motion_manifest(record, manifest_path):
       suffix convention documented at ``examples/viewer/segments.js:3-5``
       (demo convention, not confirmed against a true source) -- each entry
       lists which of S/L/E/O/plain exist for one base clip name.
+    - ``events`` and ``loopTime``: authored playback metadata, copied from
+      the corresponding clip record rather than inferred from those names.
     """
     rows = []
     for c in record["clipRecords"]:
@@ -774,6 +807,9 @@ def write_motion_manifest(record, manifest_path):
             "durationSeconds": c.get("durationSeconds"),
             "channels": c.get("channels"),
             "gltfChannels": c.get("gltfChannels"),
+            "events": c["events"],
+            "loopTime": c["loopTime"],
+            "playbackMetadataMissing": c["playbackMetadataMissing"],
         })
     rows.sort(key=lambda r: r["name"])
     doc = {
