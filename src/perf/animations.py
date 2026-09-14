@@ -73,7 +73,7 @@ import UnityPy
 
 from core.gltf import GLB, unity_to_gltf_pos, unity_to_gltf_quat
 from chara.mecanim.clip import (ANIMATOR_TYPEID, TRANSFORM_TYPEID, ATTR_SIZE,
-                                curve_index_map, decode)
+                                curve_index_map, decode, hermite_keyframes)
 
 UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
 
@@ -82,7 +82,7 @@ UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
 # optional when the *resolution* logic changes either: ``package_is_current``
 # skips a package whose recorded version matches, so a fix that is not
 # accompanied by a bump is silently eaten on the next run.
-FORMAT_VERSION = 6
+FORMAT_VERSION = 7
 
 # Unity Transform attribute -> glTF channel property and glTF component width.
 # Attribute 4 is *Euler* rotation: three components in the source, and glTF has
@@ -591,22 +591,7 @@ def _channel_points(kind, pts):
     polynomial coefficients ``(a, b, c, d)`` (value = d, out = c, in = neighbour
     ``3a·Δt² + 2b·Δt + c``).
     """
-    out = []
-    if kind == "const":
-        out.append((0.0, pts[0][1], 0.0, 0.0))
-    elif kind == "linear":
-        for t, v in pts:
-            out.append((t, v, 0.0, 0.0))
-    else:  # cubic
-        n = len(pts)
-        for i, (t, (a, b, c, d)) in enumerate(pts):
-            if i + 1 < n:
-                dt = pts[i + 1][0] - t
-                in_t = 3.0 * a * dt * dt + 2.0 * b * dt + c
-            else:
-                in_t = 0.0
-            out.append((t, d, in_t, c))
-    return out
+    return hermite_keyframes(kind, pts)
 
 
 def _verbatim_values(kind, pts):

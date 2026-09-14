@@ -138,6 +138,32 @@ def evaluate(entry, t):
     return pts[-1][1]
 
 
+def hermite_keyframes(kind, points):
+    """Return ``(time, value, incoming, outgoing)`` for the playable view.
+
+    A cubic key describes the polynomial to its right. Its outgoing tangent is
+    that polynomial's derivative at zero; its incoming tangent comes from the
+    previous polynomial at this key's time. Values and times are kept verbatim:
+    any source discontinuity between adjacent segments remains a representational
+    boundary, not something this conversion silently smooths or retimes.
+    """
+    if kind == "const":
+        return [(0.0, points[0][1], 0.0, 0.0)] if points else []
+    if kind == "linear":
+        return [(time, value, 0.0, 0.0) for time, value in points]
+    if kind != "cubic":
+        raise ValueError(f"unknown decoded curve kind: {kind}")
+    result = []
+    for index, (time, (_a, _b, outgoing, value)) in enumerate(points):
+        incoming = 0.0
+        if index:
+            previous_time, (a, b, c, _d) = points[index - 1]
+            dt = time - previous_time
+            incoming = 3.0 * a * dt * dt + 2.0 * b * dt + c
+        result.append((time, value, incoming, outgoing))
+    return result
+
+
 def sample_frames(clip_tt):
     """Decode a clip and evaluate it frame by frame at its own sample rate.
 

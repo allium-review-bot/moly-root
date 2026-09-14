@@ -55,7 +55,7 @@ import collections
 import struct
 import zlib
 
-from chara.mecanim.clip import TRANSFORM_TYPEID, curve_index_map, decode
+from chara.mecanim.clip import TRANSFORM_TYPEID, curve_index_map, decode, hermite_keyframes
 
 # Unity Transform generic-binding attribute -> glTF channel property, and the
 # component width each carries.  Attribute 4 is Euler rotation: three source
@@ -129,21 +129,7 @@ def _component_points(kind, pts):
     ``cubic`` recovers the hermite tangents from the stored polynomial
     coefficients ``(a, b, c, d)``.
     """
-    if kind == "const":
-        return [(0.0, pts[0][1], 0.0, 0.0)]
-    if kind == "linear":
-        return [(t, v, 0.0, 0.0) for t, v in pts]
-    out = []
-    n = len(pts)
-    for i, (t, coeff) in enumerate(pts):
-        a, b, c, d = coeff
-        if i + 1 < n:
-            dt = pts[i + 1][0] - t
-            in_t = 3.0 * a * dt * dt + 2.0 * b * dt + c
-        else:
-            in_t = 0.0
-        out.append((t, d, in_t, c))
-    return out
+    return hermite_keyframes(kind, pts)
 
 
 def _accessor(glb, rows, atype):

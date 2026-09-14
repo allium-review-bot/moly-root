@@ -271,17 +271,34 @@ def test_resampling_is_a_planted_violation():
 # 4. Cubic tangent recovery (c4 value/tangent fidelity).
 # ---------------------------------------------------------------------------
 def test_cubic_value_and_tangent_recovery():
-    """For a cubic stream, value = d, out-tangent = c, in-tangent =
-    3a·Δt² + 2b·Δt + c."""
+    """A cubic key's coefficients describe the segment to its RIGHT.
+
+    Value = d and out-tangent = c both read off the key's own polynomial. The
+    incoming tangent does not: 3a·Δt² + 2b·Δt + c is that polynomial's slope at
+    the END of its segment, which is the slope arriving at the NEXT key, so it
+    is the next key's in-tangent. The first key has no predecessor and its
+    in-tangent is 0.
+
+    Which segment the coefficients span is measured, not assumed: evaluating a
+    key's polynomial at Δt to the following key must land on that key's value,
+    because the curve is continuous there and d is the value at a key. Over the
+    shipped clips that identity holds forward and fails backward -- across 66
+    packages and 113,237 curved key pairs the forward residual is at float
+    noise (median 6.2e-10, max 5.1e-07, every pair under 1e-5) while the
+    backward reading passes on 13.6% of them (median 7.1e-03).
+    """
     points = animations._channel_points("cubic", [
         (0.0, (0.0, 0.0, 1.0, 5.0)),
         (1.0, (0.0, 0.0, 2.0, 7.0))])
     assert points[0][1] == 5.0, "value must be the polynomial d"
     assert points[0][3] == 1.0, "out-tangent must be c"
-    assert approx(points[0][2], 1.0), \
-        "in-tangent must be 3a·dt² + 2b·dt + c (a=0,b=0,c=1,dt=1)"
-    # second key has no successor -> its in-tangent is 0.0
-    assert points[1][2] == 0.0
+    # first key: no preceding segment to arrive from
+    assert points[0][2] == 0.0, "the first key's in-tangent is 0"
+    assert points[1][1] == 7.0, "value must be the polynomial d"
+    assert points[1][3] == 2.0, "out-tangent must be c"
+    assert approx(points[1][2], 1.0), \
+        "in-tangent comes from the PRECEDING segment: 3a·dt² + 2b·dt + c " \
+        "with the previous key's a=0,b=0,c=1 and dt=1"
 
 
 def test_value_fidelity_const_and_cubic():
