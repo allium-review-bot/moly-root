@@ -1,5 +1,18 @@
 # moly-root
 
+## 玩家布局导入资源
+
+从对应区服的主表和已解密家具包生成导入目录及配色贴图：
+
+```sh
+python -m fixtures.player_data --master <master-directory> --bundles <decrypted-bundle-directory> --out <extracted-directory> --region cn --game-version 6.0.0
+```
+
+输出 `fixture-models/player-data.json` 和 `fixture-models/colors/`。目录保留家具、
+场地及等级解锁主表；配色按源纹理名提取，保留采样设置。使用日服输入时相应设置
+`--region jp` 和版本号。只生成主表目录时可省略 `--bundles`，但该目录不能导入其他配色。
+这些输出属于使用者提供的游戏资源，不随代码分发，后续可使用资源分包命令打包。
+
 ## Bevy 资源分包
 
 已提取目录可无损打包为角色、家具、场地、天气及公共依赖：

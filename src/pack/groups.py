@@ -21,11 +21,17 @@ ROOT_DOCUMENTS = (
     "mysekai-materials.json", "mysekai-fixture-possessions.json",
     "mysekai-material-possessions.json", "mysekai-system-fixtures.json",
     "mysekai-blueprint-material-costs.json", "mysekai-blueprint-terms.json",
+    "mysekai-fixture-player-timelines.json", "mysekai-character-talk-fixture-timelines.json",
+    "mysekai-character-talks.json",
+    "mysekai-character-talk-no-talk-fixture-actions.json",
+    "mysekai-character-talk-action-points.json", "mysekai-character-talk-conditions.json",
+    "mysekai-character-talk-condition-groups.json", "mysekai-game-character-unit-groups.json",
 )
 ASSET_DIRECTORIES = (
+    "actor-animations",
     "avatar", "avatar-parts", "camera", "cutscene-timeline", "emoticons", "fixture-areas",
     "fixture-attach", "fixture-interface", "fixture-meshes", "fixture-models",
-    "fixture-particles-v2", "fixture-talks", "fixture-timeline", "perf-animations",
+    "fixture-gimmick", "fixture-particles-v2", "fixture-talks", "fixture-timeline", "perf-animations",
     "phenomena", "site", "ui", "ui-layout-v2",
 )
 FORMATS = {".json", ".glb", ".gltf", ".png", ".jpg", ".jpeg", ".webp", ".ktx2", ".ogg", ".wav", ".bin"}
@@ -66,6 +72,9 @@ def group_of(path: str) -> tuple[str, str]:
         return ("common/motion" if top.startswith("motion-library") else "common/tables"), "common"
     if top in {"avatar", "avatar-parts"}:
         return "character/avatar", "character"
+    if top == "actor-animations":
+        return ((f"character/actions/{parts[1]}", "character") if len(parts) > 2
+                else ("common/actor-animations", "common"))
     if top == "site" and len(parts) > 2 and parts[1] in {"scenes", "props"}:
         return f"site/{parts[1]}/{parts[2]}", "site"
     if top == "site" and len(parts) > 3 and parts[1:3] == ["indoor", "modules"]:
