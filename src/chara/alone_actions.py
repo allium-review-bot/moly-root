@@ -203,8 +203,21 @@ def _steps(body, tables, scalars=None, defaults=None):
         elif op == "emoticon":
             step["op"] = "emoticon"
             step["name"] = values[1][0]
+            # Keep authored arguments separately from the managed call. The Lua
+            # wrapper forwards time as argument 3, whose binding reads a bool;
+            # the later not_play_se argument is not read by that binding.
+            step["time"] = values[2][0] if len(values) > 2 else None
+            step["notPlaySe"] = values[4][0] if len(values) > 4 else None
+            step["hostNotPlaySe"] = step["time"] is not None and step["time"] is not False
             if len(values) > 3:
                 step["showSeconds"] = values[3][0]
+            steps.append(step)
+            if len(values) > 3 and values[3][0] is not None:
+                # hide_emoticon only accepts label. The supplied second
+                # argument (time + showing_time) is discarded, not delayed.
+                steps.append({"t": t, "op": "hideEmoticon",
+                              "origin": "emoticonWrapper"})
+            continue
         else:
             step["op"] = "hideEmoticon"
         steps.append(step)
@@ -243,6 +256,7 @@ def parse_script(text, tables, scalars=None, defaults=None):
               for k, v in LOCAL_RE.findall(text)}
     scenarios, seen, low = [], 0, 0
     spans = []
+    ordered = []
     for match in BRANCH_RE.finditer(text):
         then = text.find("then", match.end())
         end = _block_end(text, then + 4)
@@ -254,6 +268,7 @@ def parse_script(text, tables, scalars=None, defaults=None):
             "trigger": {"kind": "randomBranch", "low": low, "high": high,
                         "weight": (high - low) / 100.0},
             "steps": steps})
+        ordered.append((match.start(), len(scenarios) - 1, None))
         low, seen = high, seen + count
     for match in GATE_RE.finditer(text):
         then = text.find("then", match.end())
@@ -261,14 +276,23 @@ def parse_script(text, tables, scalars=None, defaults=None):
         spans.append((then + 4, end))
         steps, count = _steps(text[then + 4:end], tables, scalars, defaults)
         limit, prob, slot = match.group(1), match.group(2), match.group(3)
+        body = text[then + 4:end]
+        writes = re.findall(r"lastSelectedTimes\[(\w+)\]\s*=\s*nowTime", body)
+        remember = consts[writes[0]] if writes else None
+        if len(writes) > 1 or (writes and CALL_RE.search(body[body.rfind("lastSelectedTimes["):] )):
+            raise ValueError("motion memory write is not a single block-tail assignment")
+        if writes and writes[0] != slot:
+            raise ValueError("motion memory write differs from the conditional slot")
         scenarios.append({
             "id": slot or f"gate@{match.start()}", "kind": "timeGated",
             "trigger": {"kind": "timeGated", "timeLimitName": limit,
                         "timeLimitSeconds": consts.get(limit),
                         "probabilityName": prob, "probability": consts.get(prob),
                         "motionSlot": slot,
+                        "motionSlotValue": consts.get(slot) if slot else None,
                         "slotMemorySeconds": consts.get("memoryDuration")},
             "steps": steps})
+        ordered.append((match.start(), len(scenarios) - 1, remember))
         seen += count
     masked = list(text)
     for start, end in spans:
@@ -277,8 +301,48 @@ def parse_script(text, tables, scalars=None, defaults=None):
     seen += tail_count
     if seen != expected:
         raise ValueError(f"scenario split accounted for {seen} of {expected} calls")
+    kinds = {s["kind"] for s in scenarios}
+    if len(kinds) != 1:
+        raise ValueError("performance loop mixes unsupported conditional families")
+    loop = re.search(r"while\s*\(is_end\(.*?\)\s*==\s*false\)\s*do", text)
+    if loop is None:
+        raise ValueError("performance script has no supported lifetime loop")
+    if CALL_RE.search(text[:loop.start()]):
+        raise ValueError("performance commands before the lifetime loop are not supported")
+    first_block = min(position for position, _, _ in ordered)
+    last_block_end = max(end for _, end in spans)
+    outside = "".join(masked)
+    if CALL_RE.search(outside[loop.end():last_block_end]):
+        raise ValueError("performance commands between conditional blocks need explicit ordering")
+    prefix = text[loop.end():first_block]
+    # Measured over every shipped performance script (31 of 31 in the alone-action
+    # package): the loop prefix holds exactly one draw, always `rand =
+    # math.random(0, 99)`, always read as integers.  The draw is present even in
+    # the time-gated scripts, where no comparison ever reads it -- the branch
+    # randomness there comes from the probability helper's own independent draw
+    # -- so a prefix without the draw is a shape the package does not contain.
+    draws = re.findall(r"rand\s*=\s*math\.random\(\s*(\d+)\s*,\s*(\d+)\s*\)", prefix)
+    if draws != [("0", "99")]:
+        raise ValueError("performance loop random range is not the integer 0..99 call")
+    sequential = kinds == {"timeGated"}
+    if sequential:
+        for fragment in ("local startTime = os.time()", "return elapsedTime < limit",
+                         "local chance = math.random(0, 99)", "return chance < probability * 100",
+                         "local nowTime = os.time()"):
+            if fragment not in text:
+                raise ValueError(f"unsupported performance control flow: {fragment}")
+        if not re.search(r"return\s*\(nowTime\s*-\s*lastSelectedTimes\[id\]\)\s*>\s*memoryDuration", text):
+            raise ValueError("performance slot memory is not the strict cached-time comparison")
+    program = {
+        "kind": "sequentialIfs" if sequential else "randomBranch",
+        "clock": "wallSeconds",
+        "loopRandomMin": 0, "loopRandomMax": 99,
+        "captureLoopTime": sequential,
+        "blocks": [{"scenario": index, "rememberSlot": remember}
+                   for _, index, remember in sorted(ordered)],
+    }
     return {"scenarios": scenarios, "tail": {"steps": tail},
-            "constants": consts, "callCount": expected}
+            "program": program, "constants": consts, "callCount": expected}
 
 
 def _text_assets(bundle):
@@ -344,7 +408,7 @@ def extract_alone_actions(bundle):
     if not units:
         raise LookupError("the bundle holds no per-character performance scripts")
     return {
-        "version": 2,
+        "version": 3,
         "semantics": {
             "timeAxis": "nominal",
             "timeAxisNote": ("t is the cumulative sum of wait durations, i.e. the authored "
@@ -368,6 +432,15 @@ def extract_alone_actions(bundle):
                               "false unless the script asks for it"),
             "droppedArgument": ("the library never forwards the 4th positional argument of its "
                                 "motion call, so it is not recorded here"),
+            "program": ("source-ordered conditional blocks; each loop draws one integer 0..99; "
+                        "sequential ifs use a script-start wall-second upper window, then an "
+                        "independent integer probability draw, then optional strict slot memory; "
+                        "rememberSlot writes the cached loop-start wall second after the block; "
+                        "tail executes once after every full loop, including no-hit loops"),
+            "emoticon": ("time and notPlaySe preserve authored arguments; hostNotPlaySe is the "
+                         "managed binding's Lua truth value of argument 3 (time). showSeconds "
+                         "is informational: the Lua helper invokes an immediate hideEmoticon "
+                         "after show when it is present; asynchronous view loading is a runtime concern"),
         },
         "constantTables": {k: len(v) for k, v in tables.items()},
         "constantScalars": scalars,

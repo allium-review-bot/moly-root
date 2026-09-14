@@ -47,13 +47,50 @@ LipSyncPresets = {
 }
 """
 
+# The synthetic time-gated script mirrors the shipped shape, not a tidied one.
+# Every performance script in the alone-action package (31 of 31, measured over
+# the package's full TextAsset set on 2026-09-14) opens its lifetime loop with
+# exactly one `rand = math.random(0, 99)` draw followed by `local nowTime =
+# os.time()`, and 30 of the 31 define the probability helper with its own
+# independent `local chance = math.random(0, 99)` draw.  The loop draw is never
+# read by any comparison in the time-gated scripts -- the branch randomness
+# comes from the helper's draw -- but it is still performed every iteration, so
+# the fixture keeps it.  Removing it would make this script a shape the shipped
+# package does not contain.
 TIME_GATED = """
+local startTime = os.time()
+
+local function hasTimeElapsed(limit)
+    if not startTime then
+        return false
+    end
+    local currentTime = os.time()
+    local elapsedTime = currentTime - startTime
+    return elapsedTime < limit
+end
+
+local function shouldExecuteWithProbability(probability)
+    local chance = math.random(0, 99)
+    return chance < probability * 100
+end
+
 local timeLimit_10 = 10
 local probability_15 = 0.15
 local memoryDuration = 15
 local MOTION_1 = 1
+local lastSelectedTimes = {}
+
+local function canSelectMotion(id, nowTime)
+    if not lastSelectedTimes[id] then
+        return true
+    end
+    return (nowTime - lastSelectedTimes[id]) > memoryDuration
+end
 
 while (is_end(Characters.Alpha) == false) do
+    rand = math.random(0, 99)
+    local nowTime = os.time()
+
     if hasTimeElapsed(timeLimit_10) and shouldExecuteWithProbability(probability_15) and canSelectMotion(MOTION_1, nowTime) then
         change_npc_eye(Characters.Alpha, EyePresets.normal)
         change_npc_mouth(Characters.Alpha, LipSyncPresets.normal01)
