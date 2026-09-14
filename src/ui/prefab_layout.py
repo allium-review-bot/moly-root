@@ -204,13 +204,14 @@ class Resolver:
     as such -- ``{"unresolved": …}`` -- and never as a guessed name.
     """
 
-    def __init__(self, objects: dict, mono_index: dict):
+    def __init__(self, objects: dict, mono_index: dict, image_dir=None):
         self.objects = objects
         self.mono_index = mono_index
         self._sprite_cache = {}
         self._texture_cache = {}
         self._atlas_cache = {}
         self._font_cache = {}
+        self.image_dir = Path(image_dir) if image_dir is not None else None
 
     def _tree(self, pid: int):
         obj = self.objects.get(pid)
@@ -239,6 +240,17 @@ class Resolver:
             else:
                 entry.update(state="ok", name=tree.get("m_Name", ""),
                              atlas=(tree.get("m_AtlasTags") or [""])[0])
+                entry["border"] = [float(tree.get("m_Border", {}).get(k, 0))
+                                   for k in ("x", "y", "z", "w")]
+                entry["pixelsPerUnit"] = float(tree.get("m_PixelsToUnits", 100))
+                if self.image_dir is not None:
+                    from UnityPy.export import SpriteHelper
+                    image = SpriteHelper.get_image_from_sprite(obj.read())
+                    self.image_dir.mkdir(parents=True, exist_ok=True)
+                    filename = f"sprite-{pid}.png"
+                    image.save(self.image_dir / filename)
+                    entry["image"] = "textures/" + filename
+                    entry["size"] = list(image.size)
                 tex_pid = ((tree.get("m_RD") or {}).get("texture")
                            or {}).get("m_PathID", 0)
                 entry["texture"] = self.texture_name(tex_pid)
@@ -255,6 +267,11 @@ class Resolver:
         else:
             entry = {"pathId": pid, "state": "ok", "name": tree.get("m_Name", ""),
                      "size": [tree.get("m_Width", 0), tree.get("m_Height", 0)]}
+            if self.image_dir is not None:
+                self.image_dir.mkdir(parents=True, exist_ok=True)
+                filename = f"texture-{pid}.png"
+                obj.read().image.save(self.image_dir / filename)
+                entry["image"] = "textures/" + filename
         self._texture_cache[pid] = entry
         return entry
 
@@ -323,6 +340,8 @@ def _component_record(env, obj, resolver):
         # a hand decode means the chain was wrong.  Fail the prefab, loudly.
         raise ValueError(f"{cls} left {record['residual']} bytes undecoded")
     out = {
+        "pathId": obj.path_id,
+        "enabled": record.get("meta", {}).get("m_Enabled", True),
         "class": cls,
         "type": record["type"],
         "handDecoded": record.get("hand_decoded", False),
@@ -390,6 +409,10 @@ def extract_prefab(env, objects, root_go_pid, root_transform_pid, resolver,
                 continue
             components.append(_component_record(env, obj, resolver))
         nodes.append({
+            "gameObjectId": go_pid,
+            "transformId": transform_pid,
+            "parentTransformId": (frame.get("m_Father") or {}).get("m_PathID", 0),
+            "active": bool(tt(go_pid).get("m_IsActive", True)),
             "path": here,
             "name": name,
             "rect": {
@@ -430,7 +453,7 @@ def extract_prefab(env, objects, root_go_pid, root_transform_pid, resolver,
                                  "TMPro.TextMeshProUGUI"):
                 texts += 1
     document = {
-        "version": 1,
+        "version": 2,
         "prefab": prefab_name,
         "family": family,
         "source": {
@@ -628,7 +651,21 @@ def extract_layout(player_data: str, out_dir, bundles_root=None,
     mono_index = talk.build_monoscript_index(env)
 
     talk._DECODERS.update(EXTRA_DECODERS)
-    resolver = Resolver(objects, mono_index)
+    resolver = Resolver(objects, mono_index, out / "textures")
+    runtime_textures = {}
+    if bundles_root:
+        package = Path(bundles_root) / "mysekai__ui__mysekai_menu"
+        if not package.is_file():
+            raise FileNotFoundError(f"UI texture bundle missing: {package.name}")
+        texture_env = UnityPy.load(str(package))
+        for obj in texture_env.objects:
+            if obj.type.name != "Texture2D":
+                continue
+            texture = obj.read()
+            relative = f"textures/menu-{obj.path_id}.png"
+            texture.image.save(out / relative)
+            runtime_textures[texture.m_Name] = relative
+    write_json(out / "textures.json", runtime_textures)
 
     written, failures = [], []
     for family, prefabs in SCREENS.items():

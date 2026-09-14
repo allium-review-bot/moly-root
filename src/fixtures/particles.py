@@ -290,6 +290,7 @@ class _Materials:
         return {
             "name": tree.get("m_Name"),
             "shader": shader,
+            "keywords": keywords,
             "renderQueue": tree.get("m_CustomRenderQueue", -1),
             "textures": textures,
             "textureArrays": arrays,
@@ -538,7 +539,7 @@ def _emitters(store, record, materials):
 def _export_package(store, name, out, domain, images_factory):
     """One package to ``<out>/<name>.json``, or a missing record with no file."""
     package = store.package(name)
-    document = {"version": 1, "name": name, "domain": domain, "missing": False}
+    document = {"version": 2, "name": name, "domain": domain, "missing": False}
     if package is None:
         document.update(emitters=[], unsupported=[], missing=True,
                         reason=MISSING_BUNDLE, file=None,
@@ -546,10 +547,44 @@ def _export_package(store, name, out, domain, images_factory):
         return document, None
     images = images_factory(out / "textures")
     materials = _Materials(store, images)
-    emitters, unsupported, counts = [], [], {}
+    emitters, unsupported, counts, nodes = [], [], {}, []
     for record in package.files:
         file_emitters, file_unsupported, file_counts = _emitters(
             store, record, materials)
+        path_of = _paths(record)
+        transforms = {pid: record.tree(pid) for pid, kind in record.kinds.items()
+                      if kind in TRANSFORMS}
+        by_go = {(tree.get("m_GameObject") or {}).get("m_PathID", 0): tree
+                 for tree in transforms.values()}
+        active_cache = {}
+        def active(go):
+            # Path id 0 is Unity's null pointer, not an object id. An emitter
+            # whose system typetree would not read carries no owner (the
+            # recovery above leaves gameObjectId at 0), so there is no
+            # hierarchy to walk. None says that; True would invent an answer
+            # indistinguishable from a real one, and looking the id up is a
+            # KeyError that costs the whole package.
+            if not go:
+                return None
+            if go in active_cache:
+                return active_cache[go]
+            own = bool(record.tree(go).get("m_IsActive", True))
+            parent = transforms.get((by_go.get(go, {}).get("m_Father") or {}).get("m_PathID", 0))
+            parent_go = (parent.get("m_GameObject") or {}).get("m_PathID", 0) if parent else 0
+            result = own and (active(parent_go) if parent_go else True)
+            active_cache[go] = result
+            return result
+        for go, tree in by_go.items():
+            parent = transforms.get((tree.get("m_Father") or {}).get("m_PathID", 0))
+            nodes.append({"gameObjectId": go, "node": path_of.get(go),
+                          "parentGameObjectId": (parent.get("m_GameObject") or {}).get("m_PathID", 0) if parent else 0,
+                          "active": bool(record.tree(go).get("m_IsActive", True)),
+                          "activeInHierarchy": active(go),
+                          "position": [tree["m_LocalPosition"][k] for k in "xyz"],
+                          "rotation": [tree["m_LocalRotation"][k] for k in "xyzw"],
+                          "scale": [tree["m_LocalScale"][k] for k in "xyz"]})
+        for emitter in file_emitters:
+            emitter["activeInHierarchy"] = active(emitter["gameObjectId"])
         emitters.extend(file_emitters)
         unsupported.extend(file_unsupported)
         for key, value in file_counts.items():
@@ -564,7 +599,7 @@ def _export_package(store, name, out, domain, images_factory):
                    meshPointersUnresolved=counts["meshPointersUnresolved"],
                    systemReadFailures=counts["systemReadFailures"],
                    rendererReadFailures=counts["rendererReadFailures"])
-    document.update(emitters=emitters, unsupported=unsupported, file=None,
+    document.update(emitters=emitters, nodes=nodes, unsupported=unsupported, file=None,
                     summary=summary)
     if not emitters and not unsupported:
         return document, None

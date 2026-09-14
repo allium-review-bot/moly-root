@@ -381,6 +381,38 @@ def decode_button(r: Reader):
     return d
 
 
+def decode_slider(r: Reader):
+    """UnityEngine.UI.Slider : Selectable, serialized fields in declaration order.
+
+    Fill/handle references are RectTransform PPtrs. The runtime caches after
+    m_OnValueChanged (m_FillImage, container transforms and m_Offset) are not
+    serialized. The value-change event can contain persistent calls.
+    """
+    d = decode_selectable_base(r)
+    d["m_FillRect"] = r.pptr()
+    d["m_HandleRect"] = r.pptr()
+    d["m_Direction"] = r.i32()
+    d["m_MinValue"] = r.f32()
+    d["m_MaxValue"] = r.f32()
+    d["m_WholeNumbers"] = r.bool4()
+    d["m_Value"] = r.f32()
+    d["m_OnValueChanged"] = decode_unity_event(r)
+    return d
+
+
+def decode_customslider(r: Reader):
+    """Sekai.UI.CustomSlider adds three serialized, four-byte aligned bools.
+
+    cn-6.0.0 declaration: m_isUseExtension, m_isUseSliderSE, then
+    m_isUsePositionOneValueMax. currentValue and callbacks are runtime only.
+    """
+    d = decode_slider(r)
+    d["m_isUseExtension"] = r.bool4()
+    d["m_isUseSliderSE"] = r.bool4()
+    d["m_isUsePositionOneValueMax"] = r.bool4()
+    return d
+
+
 def decode_custombutton(r: Reader):
     """Sekai.UI.CustomButton : Button : Selectable。
 
@@ -444,17 +476,22 @@ def decode_maskable_graphic_base(r: Reader):
 
 
 def decode_image_base(r: Reader):
-    """UnityEngine.UI.Image 序列化字段（本 player build 实测 48 字节，无 m_FillOrigin/m_UseSpriteMesh/m_PixelsPerUnit）：
-    m_Sprite + m_OverrideSprite + m_Type + m_PreserveAspect + m_FillCenter + m_FillMethod + m_FillAmount + m_FillClockwise。"""
+    """Serialized Image fields; overrideSprite is a runtime-only reference.
+
+    The omitted runtime pointer and the final three serialized fields occupy
+    the same byte count. Residual length alone cannot distinguish the layouts.
+    """
     d = {}
     d["m_Sprite"] = r.pptr()
-    d["m_OverrideSprite"] = r.pptr()
     d["m_Type"] = r.i32()
     d["m_PreserveAspect"] = r.bool4()
     d["m_FillCenter"] = r.bool4()
     d["m_FillMethod"] = r.i32()
     d["m_FillAmount"] = r.f32()
     d["m_FillClockwise"] = r.bool4()
+    d["m_FillOrigin"] = r.i32()
+    d["m_UseSpriteMesh"] = r.bool4()
+    d["m_PixelsPerUnitMultiplier"] = r.f32()
     return d
 
 
@@ -682,6 +719,8 @@ _DECODERS = {
     "CP.ClickDetector": decode_clickdetector,
     "Sekai.UI.CustomButton": decode_custombutton,
     "UnityEngine.UI.Button": decode_button,
+    "UnityEngine.UI.Slider": decode_slider,
+    "Sekai.UI.CustomSlider": decode_customslider,
     "UnityEngine.UI.Selectable": decode_selectable_base,
     "Sekai.TalkWindow": decode_talkwindow,
     "UnityEngine.UI.Text": decode_text_base,

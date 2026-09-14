@@ -63,15 +63,19 @@ def load_transform_recipe(xf_name: str, transforms_path=None) -> dict:
 
 def iter_files(root: Path):
     """Every regular file under *root*, in a stable (sorted) order."""
-    for p in sorted(root.rglob("*")):
-        if p.is_file():
+    for p in sorted(root.iterdir()):
+        if p.is_symlink() or getattr(p, "is_junction", lambda: False)():
+            continue
+        if p.is_dir():
+            yield from iter_files(p)
+        elif p.is_file():
             yield p
 
 
 def build(src, out, version, *, categories_path=None, blob_prefix=DEFAULT_BLOB_PREFIX,
           progress=None, xf_overlay=None, xf_name=None,
           xf_overlay_expect_files=None, xf_overlay_expect_bytes=None,
-          transforms_path=None) -> dict:
+          transforms_path=None, paths=None, manifest_name="manifest.json") -> dict:
     """Pack *src* into *out*/blobs/ + *out*/manifest.json. Returns a report dict."""
     src = Path(src)
     out = Path(out)
@@ -126,6 +130,18 @@ def build(src, out, version, *, categories_path=None, blob_prefix=DEFAULT_BLOB_P
     table = load_categories(categories_path)
     blobs_dir = out / "blobs"
     blobs_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = out / manifest_name
+    if not manifest_path.resolve().is_relative_to(out.resolve()):
+        raise ValueError("manifest path must stay inside the output directory")
+    previous_blobs = {}
+    if manifest_path.is_file():
+        previous = json.loads(manifest_path.read_text("utf-8"))
+        if previous.get("schema") == SCHEMA_ID:
+            for entry in previous.get("entries", []):
+                blob = blobs_dir / entry["blob"]
+                if blob.resolve().is_relative_to(blobs_dir.resolve()) and blob.is_file() and blob.stat().st_size == entry["blob_bytes"]:
+                    previous_blobs[(entry["content_sha256"], entry["codec"], entry["http_encoding"])] = (
+                        entry["blob"], entry["blob_bytes"], entry["blob_sha256"], entry["bytes"])
 
     entries = []
     # (content_sha256, codec, http_encoding) -> (blob_rel_path, blob_bytes_len, blob_sha256, content_len)
@@ -138,7 +154,16 @@ def build(src, out, version, *, categories_path=None, blob_prefix=DEFAULT_BLOB_P
     files_seen = 0
     overlay_applied = 0
 
-    for path in iter_files(src):
+    if paths is None:
+        inputs = iter_files(src)
+    else:
+        inputs = []
+        for relative in sorted(set(paths)):
+            path = src / relative
+            if not path.resolve().is_relative_to(src.resolve()) or not path.is_file():
+                raise ValueError(f"asset path is outside the source or missing: {relative}")
+            inputs.append(path)
+    for path in inputs:
         rel = path.relative_to(src).as_posix()
         overlay_path = overlay_index.get(rel)
         if overlay_path is not None:
@@ -152,6 +177,9 @@ def build(src, out, version, *, categories_path=None, blob_prefix=DEFAULT_BLOB_P
         cache_key = (content_sha, rule.codec, rule.http_encoding)
 
         cached = blob_cache.get(cache_key)
+        if cached is None and cache_key in previous_blobs:
+            cached = previous_blobs[cache_key]
+            blob_cache[cache_key] = cached
         if cached is None:
             encoded = codecs.encode_blob(content, rule.codec, rule.http_encoding)
             # Round-trip guard: an encoder that produced bytes which do not
@@ -248,7 +276,9 @@ def build(src, out, version, *, categories_path=None, blob_prefix=DEFAULT_BLOB_P
         "entries": entries,
     }
 
-    manifest_path = out / "manifest.json"
+    manifest_path = out / manifest_name
+    if not manifest_path.resolve().is_relative_to(out.resolve()):
+        raise ValueError("manifest path must stay inside the output directory")
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2, allow_nan=False) + "\n",

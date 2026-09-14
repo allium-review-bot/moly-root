@@ -34,6 +34,16 @@ def flip_winding(indices):
     return out
 
 
+def unity_sampler(filter_mode, wrap_u, wrap_v, mip_count):
+    """Represent the source texture's filtering and address modes in glTF."""
+    wraps = {0: 10497, 1: 33071, 2: 33648}
+    magnification = {0: 9728, 1: 9729, 2: 9729}
+    mip_filters = {0: 9984, 1: 9985, 2: 9987}
+    return {"magFilter": magnification[filter_mode],
+            "minFilter": mip_filters[filter_mode] if mip_count > 1 else magnification[filter_mode],
+            "wrapS": wraps[wrap_u], "wrapT": wraps[wrap_v]}
+
+
 class GLB:
     def __init__(self, generator="moly-root"):
         self.bin = bytearray()

@@ -1,5 +1,15 @@
 # moly-root
 
+## Bevy 资源分包
+
+已提取目录可无损打包为角色、家具、场地、天气及公共依赖：
+
+```sh
+python -m pack.groups --src <extracted-directory> --out <package-directory> --version <version>
+```
+
+输出包含 `asset-packs.json`、各包清单及共享内容寻址文件。包内路径保持提取目录的逻辑路径，消费者按需读取；重建保留已有内容文件。目录链接与备份目录不会被递归打包。打包产物仍属于游戏数据，不随工具代码分发。
+
 [English](README.en.md)
 
 `moly-root` 是面向《世界计划 缤纷舞台！feat. 初音未来》（Project SEKAI，简称 PJSK）资产的提取工具链，不依赖 Unity 引擎。

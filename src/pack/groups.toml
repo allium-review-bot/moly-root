@@ -1,0 +1,16 @@
+# Lossless payloads that the native and browser asset readers can both decode.
+[default]
+codec = "identity"
+http_encoding = "identity"
+
+[extensions.json]
+codec = "gzip"
+http_encoding = "identity"
+
+[extensions.glb]
+codec = "gzip"
+http_encoding = "identity"
+
+[extensions.bin]
+codec = "gzip"
+http_encoding = "identity"

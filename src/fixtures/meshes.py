@@ -225,10 +225,20 @@ def _texture_index(glb, record, path_id, cache):
     except Exception:
         raise ValueError(TEXTURE_DECODE_FAILED)
     view = glb.view(png)
+    from core.gltf import unity_sampler
+    settings = tex.m_TextureSettings
+    sampler = unity_sampler(settings.m_FilterMode, settings.m_WrapU,
+                            settings.m_WrapV, tex.m_MipCount)
+    if sampler not in glb.g["samplers"]:
+        glb.g["samplers"].append(sampler)
+    sampler_index = glb.g["samplers"].index(sampler)
     glb.g["images"].append({"bufferView": view, "mimeType": "image/png",
                             "name": tex.m_Name})
-    glb.g["textures"].append({"sampler": 0, "source": len(glb.g["images"]) - 1,
-                              "name": tex.m_Name})
+    glb.g["textures"].append({"sampler": sampler_index, "source": len(glb.g["images"]) - 1,
+                            "name": tex.m_Name,
+                            "extras": {"mipCount": tex.m_MipCount,
+                                       "anisotropy": settings.m_Aniso,
+                                       "mipBias": settings.m_MipBias}})
     index = len(glb.g["textures"]) - 1
     cache[key] = index
     return index
@@ -523,7 +533,7 @@ def _materials(tree):
     return list(tree.get("m_Materials") or [])
 
 
-def _walk(glb, record, store, tpid, parent, ctx, prefix=""):
+def _walk(glb, record, store, tpid, parent, ctx, prefix="", fence_scope=False):
     """Export one transform and its children, returning the glTF node index.
 
     *prefix* is the node's full path from its variant root -- the same path
@@ -539,6 +549,19 @@ def _walk(glb, record, store, tpid, parent, ctx, prefix=""):
     node = {"name": name, "translation": translation,
             "rotation": rotation, "scale": scale,
             "extras": {"sourcePathId": tpid, "gameObjectId": goid}}
+    if goid in ctx["roadCells"]:
+        node["extras"]["roadCellType"] = ctx["roadCells"][goid]
+    fence_scope = fence_scope or goid in ctx["fenceRoots"]
+    if fence_scope:
+        node["extras"]["fenceActive"] = bool(ctx["gameobjects"][goid]["m_IsActive"])
+        if goid in ctx["fenceRoots"]:
+            node["extras"]["fenceView"] = True
+        if goid in ctx["fenceParts"]:
+            node["extras"]["fencePart"] = ctx["fenceParts"][goid]
+        renderers = [(_tree(record, cid) or {}) for cid, kind in _components(record, goid)
+                     if kind in ("MeshRenderer", "SkinnedMeshRenderer")]
+        if renderers:
+            node["extras"]["fenceRendererEnabled"] = all(bool(r["m_Enabled"]) for r in renderers)
     index = len(glb.g["nodes"])
     glb.g["nodes"].append(node)
     ctx["nodeIndex"][tpid] = index
@@ -648,7 +671,7 @@ def _walk(glb, record, store, tpid, parent, ctx, prefix=""):
         child_id = (child or {}).get("m_PathID", 0)
         if child_id in ctx["transforms"]:
             children.append(_walk(glb, record, store, child_id, index, ctx,
-                                  prefix=full))
+                                  prefix=full, fence_scope=fence_scope))
     if children:
         node["children"] = children
     if parent is not None:
@@ -754,6 +777,43 @@ def _variants(glb, record, store, transforms, gameobjects, roots, ctx,
     return root_nodes, variants
 
 
+def _road_cells(record):
+    """RoadView cell roles resolved through RoadCell._renderer references."""
+    cells = {}
+    for cid, kind in record.kinds.items():
+        if kind != "MonoBehaviour" or record.script_of(cid) != "RoadView":
+            continue
+        for entry in record.tree(cid)["_roadViewDataList"]:
+            pointer = entry["_cell"]
+            if pointer["m_FileID"] != 0:
+                raise ValueError("RoadCell reference outside serialized file")
+            cell = record.tree(pointer["m_PathID"])
+            renderer = cell["_renderer"]
+            if renderer["m_FileID"] != 0:
+                raise ValueError("Road renderer reference outside serialized file")
+            goid = record.tree(renderer["m_PathID"])["m_GameObject"]["m_PathID"]
+            cells[goid] = entry["_cellType"]
+    return cells
+
+
+def _fence_views(record):
+    """Fence part enums follow serialized GameObject references, never names."""
+    roots, parts = set(), {}
+    for cid, kind in record.kinds.items():
+        if kind != "MonoBehaviour" or record.script_of(cid) != "FenceView":
+            continue
+        tree = record.tree(cid)
+        roots.add(tree["m_GameObject"]["m_PathID"])
+        for key, enum_key, role in [("_poleViewDataList", "_poleType", "pole"),
+                                     ("_wingViewDataList", "_wingType", "wing")]:
+            for row in tree[key]:
+                view = row["_view"]
+                if view["m_FileID"] != 0 or view["m_PathID"] not in record.kinds:
+                    raise ValueError("FenceView part reference is outside its serialized file")
+                parts[view["m_PathID"]] = {"kind": role, "type": row[enum_key]}
+    return roots, parts
+
+
 def _fixture_view_game_objects(record):
     """Game object ids whose behaviour is a ``FixtureView``, by class name."""
     out = []
@@ -815,6 +875,8 @@ def _export_package(store, name, out_dir):
         transforms, gameobjects, roots = _graph(record)
         ctx["transforms"] = transforms
         ctx["gameobjects"] = gameobjects
+        ctx["fenceRoots"], ctx["fenceParts"] = _fence_views(record)
+        ctx["roadCells"] = _road_cells(record)
         ctx["fixtureView"] |= set(_fixture_view_game_objects(record))
         if not container:
             container = _container(record)
