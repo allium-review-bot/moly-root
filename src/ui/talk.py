@@ -402,7 +402,7 @@ def decode_slider(r: Reader):
 def decode_customslider(r: Reader):
     """Sekai.UI.CustomSlider adds three serialized, four-byte aligned bools.
 
-    cn-6.0.0 declaration: m_isUseExtension, m_isUseSliderSE, then
+    Declaration order: m_isUseExtension, m_isUseSliderSE, then
     m_isUsePositionOneValueMax. currentValue and callbacks are runtime only.
     """
     d = decode_slider(r)
