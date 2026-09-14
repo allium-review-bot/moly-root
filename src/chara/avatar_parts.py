@@ -34,12 +34,13 @@ import json
 import os
 
 import UnityPy
+from core.unity import configure_fallback_unity_version
 
 # The decrypted packages carry no Unity version in their headers (see the
 # root docs); without this every load raises, which reads as "all packages
 # broken" when it is only the loader's default missing.  Same precedent as
 # chara.motion_index, the other module here with its own CLI.
-UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
+configure_fallback_unity_version()
 
 from core.gltf import GLB, unity_to_gltf_pos, unity_to_gltf_quat
 from core.jsonio import dumps

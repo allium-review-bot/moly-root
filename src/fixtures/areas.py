@@ -31,11 +31,12 @@ import os
 from pathlib import Path
 
 import UnityPy
+from core.unity import configure_fallback_unity_version
 
 from core.assets.packages import PackageStore
 from core.jsonio import write_json
 
-UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
+configure_fallback_unity_version()
 
 FIXTURE_PREFIX = "mysekai__fixture__"
 META_CONTAINER = "fixture_metadata"

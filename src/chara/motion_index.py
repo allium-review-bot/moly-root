@@ -7,9 +7,10 @@ import re
 from pathlib import Path
 
 import UnityPy
+from core.unity import configure_fallback_unity_version
 import UnityPy.config
 
-UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
+configure_fallback_unity_version()
 
 
 _BASE = re.compile(r"^mov_(?P<family>[^_]+)_(?P<action>.+?)(?P<num>\d{3})(?P<side>[lr]?)$")

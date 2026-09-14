@@ -33,10 +33,11 @@ import warnings
 from pathlib import Path
 
 import UnityPy
+from core.unity import configure_fallback_unity_version
 
 warnings.filterwarnings("ignore")
 
-UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
+configure_fallback_unity_version()
 
 from core.jsonio import write_json
 import ui.talk as talk

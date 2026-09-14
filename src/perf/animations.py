@@ -70,12 +70,13 @@ import struct
 import zlib
 
 import UnityPy
+from core.unity import configure_fallback_unity_version
 
 from core.gltf import GLB, unity_to_gltf_pos, unity_to_gltf_quat
 from chara.mecanim.clip import (ANIMATOR_TYPEID, TRANSFORM_TYPEID, ATTR_SIZE,
                                 curve_index_map, decode, hermite_keyframes)
 
-UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
+configure_fallback_unity_version()
 
 # Artifact format revision.  Bumped when the on-disk shape changes so a resumed
 # run re-exports stale packages instead of trusting them.  Bumping it is not

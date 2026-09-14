@@ -61,8 +61,9 @@ missing path with zero objects and silence.
 from pathlib import Path
 
 import UnityPy
+from core.unity import configure_fallback_unity_version
 
-UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
+configure_fallback_unity_version()
 
 from core.assets.router import route
 from core.jsonio import write_json

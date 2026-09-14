@@ -32,7 +32,10 @@ FIXTURE_PARTICLES_SKIPPED = ("furniture particle emitters were not requested; "
 # extractor modules assign this at import, which is enough when the caller comes
 # through the command line and nothing else, but the jobs that run before any of
 # them is imported would then read with nothing set at all.
-DEFAULT_UNITY_VERSION = "2022.3.62f3"
+from core.unity import (  # re-exported: callers import it from here
+    DEFAULT_UNITY_VERSION,
+    configure_fallback_unity_version,
+)
 
 
 # Object types that are containers or metadata rather than content of their own,
@@ -192,12 +195,7 @@ def _configure_unity_version(unity_version):
     only a wholly unconfigured process gets :data:`DEFAULT_UNITY_VERSION`, so a
     direct call does not depend on which extractor module was imported first.
     """
-    import UnityPy.config
-    if unity_version:
-        UnityPy.config.FALLBACK_UNITY_VERSION = unity_version
-    elif not getattr(UnityPy.config, "FALLBACK_UNITY_VERSION", None):
-        UnityPy.config.FALLBACK_UNITY_VERSION = DEFAULT_UNITY_VERSION
-    return UnityPy.config.FALLBACK_UNITY_VERSION
+    return configure_fallback_unity_version(unity_version)
 
 # Every output path this module's jobs write that does *not* vary with a package
 # or unit name, relative to the output directory, with a trailing ``/`` on the

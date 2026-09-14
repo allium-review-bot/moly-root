@@ -32,12 +32,13 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 import UnityPy
+from core.unity import configure_fallback_unity_version
 
 from core.jsonio import write_json
 from core.master import Master
 from chara import talks as talks_chara
 
-UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
+configure_fallback_unity_version()
 
 SCRIPT_VOCAB = talks_chara.ALL_CALL_OPS
 _SCRIPT_VOCAB_SET = set(SCRIPT_VOCAB)

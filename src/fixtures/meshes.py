@@ -51,6 +51,7 @@ import struct
 from pathlib import Path
 
 import UnityPy
+from core.unity import configure_fallback_unity_version
 from UnityPy.helpers.MeshHelper import MeshHandler
 
 from core.assets.packages import PackageStore
@@ -63,7 +64,7 @@ from core.mesh import (FLOAT, UNSIGNED_INT, ARRAY_BUFFER, ELEMENT_ARRAY_BUFFER,
                        skin_accessors)
 from fixtures.animations import embed
 
-UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
+configure_fallback_unity_version()
 
 FIXTURE_PREFIX = "mysekai__fixture__"
 TRANSFORMS = ("Transform", "RectTransform")

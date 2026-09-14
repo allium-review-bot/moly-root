@@ -13,11 +13,12 @@ import struct
 from typing import Callable, Iterable
 
 import UnityPy
+from core.unity import configure_fallback_unity_version
 import warnings
 
 warnings.filterwarnings("ignore")
 
-UnityPy.config.FALLBACK_UNITY_VERSION = "2022.3.62f3"
+configure_fallback_unity_version()
 
 # 调用方必须显式传入资产路径：没有默认值，拿不到时明确报错。
 DEFAULT_UNITY3D = None
