@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .assets.manifest import parse_manifest
 from .assets.router import route
+from .master import record_master_inputs
 
 # Furniture geometry is the one pass whose output is measured in gigabytes: one
 # ``.glb`` per package over the whole ``mysekai__fixture__`` family.  Making it
@@ -591,6 +592,7 @@ def write_pack_manifest(out):
     return path
 
 
+@record_master_inputs
 def extract_manifest(manifest, bundles, out, unity_version=None, master=None,
                      player_data=None,
                      fixture_meshes=False,

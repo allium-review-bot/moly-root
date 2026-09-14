@@ -8,7 +8,11 @@ import json
 from pathlib import Path
 import re
 
+from core.atomic import exclusive_lock, json_bytes, write_bytes
+
 from .build import build, iter_files
+from .paths import asset_path, canonical_inputs, output_path, separate_output
+from .verify import verify_catalog_data
 
 
 ROOT_DOCUMENTS = (
@@ -38,28 +42,26 @@ FORMATS = {".json", ".glb", ".gltf", ".png", ".jpg", ".jpeg", ".webp", ".ktx2", 
 
 
 def character_files(root: Path):
+    if not (root / "manifest.json").is_file():
+        return
     manifest = json.loads((root / "manifest.json").read_text("utf-8"))
     for unit in manifest["units"]:
         for key in ("glb", "rig"):
             if unit.get(key):
                 yield unit[key]
         if unit.get("rig"):
-            rig_path = root / unit["rig"]
-            if not rig_path.resolve().is_relative_to(root.resolve()):
-                raise ValueError("character rig must stay inside the asset source")
+            rig_path = asset_path(root, unit["rig"])
             rig = json.loads(rig_path.read_text("utf-8"))
             for texture in rig.get("textures", []):
-                yield (Path(unit["rig"]).parent / texture).as_posix()
-        path = root / unit["glb"]
-        if not path.resolve().is_relative_to(root.resolve()):
-            raise ValueError("character geometry must stay inside the asset source")
+                yield rig_path.parent / texture
+        path = asset_path(root, unit["glb"])
         data = path.read_bytes()
         length = int.from_bytes(data[12:16], "little")
         document = json.loads(data[20:20 + length])
         for row in document.get("images", []) + document.get("buffers", []):
             uri = row.get("uri", "")
             if uri and not uri.startswith("data:"):
-                yield (Path(unit["glb"]).parent / uri).as_posix()
+                yield path.parent / uri
 
 
 def group_of(path: str) -> tuple[str, str]:
@@ -94,7 +96,16 @@ def group_of(path: str) -> tuple[str, str]:
 
 
 def build_groups(source, output, version):
-    source, output = Path(source), Path(output)
+    source, output = separate_output(source, output)
+    with exclusive_lock(output / ".publish.lock"):
+        return _build_groups(source, output, version)
+
+
+def _build_groups(source, output, version):
+    current_path = output_path(output, "asset-packs.json")
+    previous_bytes = current_path.read_bytes() if current_path.is_file() else None
+    previous = json.loads(previous_bytes) if previous_bytes is not None else {}
+    old_packages = {package["id"]: package["manifest"] for package in previous.get("packages", [])}
     paths = {path for path in ROOT_DOCUMENTS if (source / path).is_file()}
     paths.update(character_files(source))
     for directory in ASSET_DIRECTORIES:
@@ -105,7 +116,7 @@ def build_groups(source, output, version):
                      if p.suffix.lower() in FORMATS and ".pre-" not in p.as_posix())
     grouped = defaultdict(list)
     kinds = {}
-    for path in sorted(paths):
+    for path in canonical_inputs(source, paths):
         group, kind = group_of(path)
         grouped[group].append(path)
         kinds[group] = kind
@@ -118,9 +129,10 @@ def build_groups(source, output, version):
         "site": ["common/tables", "common/site", "common/weather"],
     }
     for group, files in sorted(grouped.items()):
-        name = "packages/" + hashlib.sha256(group.encode()).hexdigest()[:24] + ".json"
-        report = build(source, output, version, paths=files, manifest_name=name,
+        report = build(source, output, version, paths=files, manifest_name=None,
+                       previous_manifest=old_packages.get(group),
                        categories_path=Path(__file__).with_name("groups.toml"))
+        name = Path(report["manifest"]).relative_to(output).as_posix()
         packages.append({
             "id": group, "kind": kinds[group], "manifest": name,
             "dependencies": [key for key in dependency_groups.get(kinds[group], []) if key in common],
@@ -129,8 +141,16 @@ def build_groups(source, output, version):
         })
         print(f"{group}: {len(files)} files, {report['download_bytes']} bytes", flush=True)
     catalog = {"schema": "moly-asset-packs/1", "version": version, "packages": packages}
-    output.mkdir(parents=True, exist_ok=True)
-    (output / "asset-packs.json").write_text(json.dumps(catalog, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+    errors, _ = verify_catalog_data(catalog, output)
+    if errors:
+        raise RuntimeError("refusing to publish invalid catalog: " + "; ".join(errors))
+    # Keep every previous publication as a GC root. Package manifests and blobs
+    # are immutable, so even a reader holding the old catalog sees one version.
+    if previous_bytes is not None:
+        write_bytes(output_path(output, f"catalogs/{hashlib.sha256(previous_bytes).hexdigest()}.json"), previous_bytes)
+    data = json_bytes(catalog)
+    write_bytes(output_path(output, f"catalogs/{hashlib.sha256(data).hexdigest()}.json"), data)
+    write_bytes(current_path, data)
     return catalog
 
 

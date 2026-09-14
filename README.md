@@ -21,7 +21,9 @@ python -m fixtures.player_data --master <master-directory> --bundles <decrypted-
 python -m pack.groups --src <extracted-directory> --out <package-directory> --version <version>
 ```
 
-输出包含 `asset-packs.json`、各包清单及共享内容寻址文件。包内路径保持提取目录的逻辑路径，消费者按需读取；重建保留已有内容文件。目录链接与备份目录不会被递归打包。打包产物仍属于游戏数据，不随工具代码分发。
+输出包含 `asset-packs.json`、各包清单及共享内容寻址文件。重建会核验并修复损坏 blob，全部包校验通过后原子切换 catalog；历史包清单与 catalog 保留。源目录、输出目录和 overlay 与输出不得重叠。打包产物仍属于游戏数据，不随工具代码分发。
+
+使用 `python -m pack.verify --out <package-directory>` 检查完整发布，`python -m pack.gc --out <package-directory> --json` 列出所有保留代都不再引用的 blob。详见[下载、缓存与分包的完整性](docs/reliability.md)。
 
 [English](README.en.md)
 
